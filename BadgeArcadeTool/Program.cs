@@ -66,6 +66,9 @@ namespace BadgeArcadeTool
 
         static void UpdateArchives()
         {
+            Log("Testing Crypto Server...");
+            var passed_selftest = NetworkUtils.TestCryptoServer();
+
             foreach (var country in country_list.Keys)
             {
                 Log($"Checking {country}...");
@@ -75,15 +78,16 @@ namespace BadgeArcadeTool
                 foreach (var archive in badge_filelist)
                 {
                     var archive_path = Path.Combine(country_dir, archive);
-                    var updated = false;
+                    var sarc_path = Path.Combine(country_dir, Path.GetFileNameWithoutExtension(archive_path) + ".sarc");
                     var server_file = string.Format(server, country_id, archive);
                     if (!File.Exists(archive_path))
                     {
                         var arc = NetworkUtils.TryDownload(server_file);
                         if (arc != null)
                         {
-                            updated = true;
                             File.WriteAllBytes(archive_path, arc);
+                            if (File.Exists(sarc_path))
+                                File.Delete(sarc_path);
                         }
                     }
                     else
@@ -95,13 +99,14 @@ namespace BadgeArcadeTool
                             var arc = NetworkUtils.TryDownload(server_file);
                             if (arc != null)
                             {
-                                updated = true;
                                 File.WriteAllBytes(archive_path, arc);
+                                if (File.Exists(sarc_path))
+                                    File.Delete(sarc_path);
                             }
                         }
                     }
 
-                    if (updated)
+                    if (!File.Exists(sarc_path) && passed_selftest)
                     {
                         keep_log = true;
                         Log($"{country}'s {archive} is updated. Decrypting + Extracting...");
@@ -109,13 +114,15 @@ namespace BadgeArcadeTool
                         if (dec_boss == null)
                             continue;
                         var sarcdata = dec_boss.Skip(0x296).ToArray();
-                        File.WriteAllBytes(Path.Combine(country_dir, Path.GetFileNameWithoutExtension(archive_path) + ".sarc"), sarcdata);
+                        File.WriteAllBytes(sarc_path, sarcdata);
 
-                        var sarc = SARC.Analyze(Path.Combine(country_dir, Path.GetFileNameWithoutExtension(archive_path) + ".sarc"));
+                        var sarc = SARC.Analyze(sarc_path);
 
                         if (!sarc.valid)
                         {
                             Log($"{country}'s {archive} isn't a valid SARC. Maybe bad decryption...?");
+                            passed_selftest = false;
+                            File.Delete(sarc_path);
                             continue;
                         }
 

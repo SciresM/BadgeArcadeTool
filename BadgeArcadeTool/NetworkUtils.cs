@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Remoting.Messaging;
@@ -7,6 +8,8 @@ namespace BadgeArcadeTool
 {
     public class NetworkUtils
     {
+        public static IPAddress crypto_ip = new IPAddress(new byte[] { 192, 168, 1, 137 });
+        public static int crypto_port = 8081;
         public static byte[] TryDownload(string file)
         {
             try
@@ -50,7 +53,7 @@ namespace BadgeArcadeTool
             iv.CopyTo(metadata, 0x20);
 
             var sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            sock.Connect(new IPAddress(new byte[] { 192, 168, 1, 137 }), 8081);
+            sock.Connect(crypto_ip, crypto_port);
             sock.Send(metadata);
 
             var _bufsize = new byte[4];
@@ -93,6 +96,71 @@ namespace BadgeArcadeTool
             sock.Send(BitConverter.GetBytes(0xDEADCAFE));
             sock.Close();
             return dec;
+        }
+
+        public static bool TestCryptoServer()
+        {
+            var iv = new byte[0x10];
+            var keyY = new byte[0x10];
+            var metadata = new byte[1024];
+            BitConverter.GetBytes(0xCAFEBABE).CopyTo(metadata, 0);
+            BitConverter.GetBytes(0x10).CopyTo(metadata, 4);
+            BitConverter.GetBytes(0x2C | 0x80 | 0x40).CopyTo(metadata, 8);
+            BitConverter.GetBytes(1).CopyTo(metadata, 0xC);
+            keyY.CopyTo(metadata, 0x10);
+            iv.CopyTo(metadata, 0x20);
+
+            var test_vector = new byte[] { 0xBC, 0xC4, 0x16, 0x2C, 0x2A, 0x06, 0x91, 0xEE, 0x47, 0x18, 0x86, 0xB8, 0xEB, 0x2F, 0xB5, 0x48 };
+            var test_vector_dec = new byte[0x10];
+            for (var i = 0; i < test_vector_dec.Length; i++)
+                test_vector_dec[i] = 0xFF;
+
+            try
+            {
+                var sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                sock.Connect(crypto_ip, crypto_port);
+                sock.Send(metadata);
+
+                var _bufsize = new byte[4];
+                sock.Receive(_bufsize);
+
+                var bufsize = BitConverter.ToInt32(_bufsize, 0);
+                sock.ReceiveBufferSize = bufsize;
+                sock.SendBufferSize = bufsize;
+
+                var ofs = 0;
+                while (ofs < test_vector.Length)
+                {
+                    var buf = new byte[ofs + bufsize < test_vector.Length ? bufsize : test_vector.Length - ofs];
+                    Array.Copy(test_vector, ofs, buf, 0, buf.Length);
+                    var s = sock.Send(buf);
+                    var r = buf.Length;
+                    while (r > 0)
+                    {
+                        var d = sock.Receive(buf);
+                        r -= d;
+                        Array.Copy(buf, 0, test_vector_dec, ofs, d);
+                        ofs += d;
+                        Array.Resize(ref buf, r);
+                    }
+                }
+
+                sock.Send(BitConverter.GetBytes(0xDEADCAFE));
+                sock.Close();
+
+                if (test_vector_dec.All(t => t == 0))
+                {
+                    Program.Log("Crypto Server test succeeded!");
+                    return true;
+                }
+                Program.Log("Crypto Server test failed due to incorrect output. Check that the server is configured properly.");
+                return false;
+            }
+            catch (SocketException sex)
+            {
+                Program.Log($"Crypto Server selftest failed due to socket exception: {sex.Message}");
+                return false;
+            }
         }
     }
 }
