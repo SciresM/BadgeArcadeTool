@@ -8,11 +8,14 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
+using CommandLine;
 
 namespace BadgeArcadeTool
 {
     class Program
     {
+        
+
         public static DateTime now = DateTime.Now;
         private static string server = "https://npdl.cdn.nintendowifi.net/p01/nsa/{0}/data/{1}?tm=2";
         private const string US_ID = "OvbmGLZ9senvgV3K";
@@ -40,6 +43,10 @@ namespace BadgeArcadeTool
 
         static void Main(string[] args)
         {
+            var parser = new Parser();
+            var options = new Options();
+            parser.ParseArguments(args, options);
+
             Directory.CreateDirectory("logs");
             Directory.CreateDirectory("data");
             Directory.CreateDirectory("badges");
@@ -54,7 +61,7 @@ namespace BadgeArcadeTool
 
             try
             {
-                UpdateArchives();
+                UpdateArchives(options);
             }
             catch (Exception ex)
             {
@@ -67,10 +74,10 @@ namespace BadgeArcadeTool
                 File.Delete(logFile);
         }
 
-        static void UpdateArchives()
+        static void UpdateArchives(Options opts)
         {
             Log("Testing Crypto Server...");
-            var passed_selftest = NetworkUtils.TestCryptoServer();
+            var passed_selftest = NetworkUtils.TestCryptoServer(IPAddress.Parse(opts.InputIP));
 
             foreach (var country in country_list.Keys)
             {
@@ -128,7 +135,7 @@ namespace BadgeArcadeTool
                     }
                     keep_log = true;
                     Log("Decrypting...", false);
-                    var dec_boss = NetworkUtils.TryDecryptBOSS(File.ReadAllBytes(archive_path));
+                    var dec_boss = NetworkUtils.TryDecryptBOSS(File.ReadAllBytes(archive_path), IPAddress.Parse(opts.InputIP));
                     if (dec_boss == null)
                         continue;
                     var sarcdata = dec_boss.Skip(0x296).ToArray();
