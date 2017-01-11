@@ -108,6 +108,7 @@ namespace BadgeArcadeTool
                     {
                         var old = File.ReadAllBytes(archive_path);
                         var new_arc = NetworkUtils.DownloadFirstBytes(server_file);
+                        if (new_arc == null) continue;
                         if (!(new_arc.SequenceEqual(old.Take(new_arc.Length))))
                         {
                             Log("Updating...", false);
@@ -152,7 +153,9 @@ namespace BadgeArcadeTool
                     Log($"Extracting...");
 
                     var data_dir = Path.Combine(country_dir, "files");
+                    var decompressed_data_dir = Path.Combine(country_dir, "decompressed");
                     CreateDirectoryIfNull(data_dir);
+                    CreateDirectoryIfNull(decompressed_data_dir);
 
                     foreach (var entry in sarc.SFat.Entries)
                     {
@@ -163,34 +166,56 @@ namespace BadgeArcadeTool
                             sb.Append((char) sarcdata[ofs++]);
                         }
                         var path = Path.Combine(data_dir, sb.ToString().Replace('/', Path.DirectorySeparatorChar));
+                        var decompressed_path = Path.Combine(decompressed_data_dir,
+                            sb.ToString().Replace('/', Path.DirectorySeparatorChar));
                         var len = entry.FileDataEnd - entry.FileDataStart;
                         var data = new byte[len];
                         Array.Copy(sarcdata, entry.FileDataStart + sarc.DataOffset, data, 0, len);
 
                         CreateDirectoryIfNull(Path.GetDirectoryName(path));
+                        CreateDirectoryIfNull(Path.GetDirectoryName(decompressed_path));
                         if (!File.Exists(path))
                         {
                             Log($"New {country} file: {Path.GetFileName(path)}");
                             File.WriteAllBytes(path, data);
 
-                            if (Path.GetFileName(path).StartsWith("Pr_") && BitConverter.ToUInt32(data, 0) == 0x307A6159) // 'Yaz0'
+                            if (BitConverter.ToUInt32(data, 0) == 0x307A6159) // 'Yaz0'
                             {
                                 var prbdata = SARC.Yaz0_Decompress(data);
+                                File.WriteAllBytes(decompressed_path, prbdata);
+                                //if (!Path.GetFileName(path).StartsWith("Pr_")) continue;
                                 if (BitConverter.ToUInt32(prbdata, 0) == 0x53425250) // 'PRBS'
                                 {
                                     var prb = new PRBS(prbdata);
-                                    var png_dir = Path.Combine(Path.Combine("png", country), prb.CategoryName);
-                                    CreateDirectoryIfNull(png_dir);
+                                    var png_dir_full = Path.Combine("png",Path.Combine(Path.Combine("full", country), prb.CategoryName));
+                                    var png_dir_tiles = Path.Combine("png", Path.Combine(Path.Combine("tiles", country), prb.CategoryName));
+                                    var png_dir_downsampled = Path.Combine("png", Path.Combine(Path.Combine("downsampled", country), prb.CategoryName));
+                                    CreateDirectoryIfNull(png_dir_full);
+                                    CreateDirectoryIfNull(png_dir_tiles);
+                                    CreateDirectoryIfNull(png_dir_downsampled);
                                     using (var bmp = prb.GetImage())
-                                        bmp.Save(Path.GetFullPath(Path.Combine(png_dir, prb.ImageName + ".png")), ImageFormat.Png);
+                                    {
+                                        bmp.Save(Path.GetFullPath(Path.Combine(png_dir_full, prb.ImageName + ".png")),
+                                            ImageFormat.Png);
+
+                                        if (prb.NumTiles == 1)
+                                        {
+                                            bmp.Save(
+                                                Path.GetFullPath(Path.Combine(png_dir_tiles, prb.ImageName + ".png")),
+                                                ImageFormat.Png);
+                                            bmp.Save(
+                                                Path.GetFullPath(Path.Combine(png_dir_downsampled, prb.ImageName + ".png")),
+                                                ImageFormat.Png);
+                                        }
+                                    }
                                     if (prb.NumTiles > 1)
                                     {
                                         using (var ptile = prb.GetTile(0))
-                                            ptile.Save(Path.GetFullPath(Path.Combine(png_dir, prb.ImageName + ".downsampledpreview.png")), ImageFormat.Png);
+                                            ptile.Save(Path.GetFullPath(Path.Combine(png_dir_downsampled, prb.ImageName + ".downsampledpreview.png")), ImageFormat.Png);
                                         for (var i = 0; i < prb.NumTiles; i++)
                                         {
                                             using (var tile = prb.GetTile(i+1))
-                                                tile.Save(Path.GetFullPath(Path.Combine(png_dir, prb.ImageName + $".tile_{i}.png")), ImageFormat.Png);
+                                                tile.Save(Path.GetFullPath(Path.Combine(png_dir_tiles, prb.ImageName + $".tile_{i}.png")), ImageFormat.Png);
                                         }
                                     }
 
