@@ -2,7 +2,7 @@
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Runtime.Remoting.Messaging;
+using System.Threading;
 
 namespace BadgeArcadeTool
 {
@@ -10,16 +10,34 @@ namespace BadgeArcadeTool
     {
         public static IPAddress crypto_ip = new IPAddress(new byte[] { 192, 168, 1, 137 });
         public static int crypto_port = 8081;
+        public static ProgressBar progress;
+        public static byte[] download_data;
+
+        private static void DownloadProgressCallback(object sender, DownloadProgressChangedEventArgs e)
+        {
+            progress.Report((double) e.BytesReceived/e.TotalBytesToReceive);
+        }
+
         public static byte[] TryDownload(string file)
         {
-            try
+            using (progress = new ProgressBar())
             {
-                return new WebClient().DownloadData(file);
-            }
-            catch (WebException wex)
-            {
-                Program.Log($"Failed to download {file}.");
-                return null;
+                try
+                {
+                    var client = new WebClient();
+                    client.DownloadProgressChanged += DownloadProgressCallback;
+                    var dataTask = client.DownloadDataTaskAsync(file);
+                    while (!dataTask.IsCompleted)
+                    {
+                        if (dataTask.IsFaulted) return null;
+                        Thread.Sleep(20);
+                    }
+                    return dataTask.Result;
+                }
+                catch (WebException wex)
+                {
+                    return null;
+                }
             }
         }
 
@@ -68,29 +86,33 @@ namespace BadgeArcadeTool
             var ofs = 0x28;
             var i = 0;
             var tot = dec.Length / bufsize;
-            while (ofs < boss.Length)
+            using (var progress = new ProgressBar())
             {
-                var buf = new byte[ofs + bufsize < boss.Length ? bufsize : boss.Length - ofs];
-                Array.Copy(boss, ofs, buf, 0, buf.Length);
-                try
+                while (ofs < boss.Length)
                 {
-                    var s = sock.Send(buf);
-                    var r = buf.Length;
-                    while (r > 0)
+                    var buf = new byte[ofs + bufsize < boss.Length ? bufsize : boss.Length - ofs];
+                    Array.Copy(boss, ofs, buf, 0, buf.Length);
+                    try
                     {
-                        var d = sock.Receive(buf);
-                        r -= d;
-                        Array.Copy(buf, 0, dec, ofs, d);
-                        ofs += d;
-                        Array.Resize(ref buf, r);
+                        var s = sock.Send(buf);
+                        var r = buf.Length;
+                        while (r > 0)
+                        {
+                            var d = sock.Receive(buf);
+                            r -= d;
+                            Array.Copy(buf, 0, dec, ofs, d);
+                            ofs += d;
+                            Array.Resize(ref buf, r);
+                            progress.Report((double) ofs/boss.Length);
+                        }
+                        i++;
                     }
-                    i++;
-                }
-                catch (SocketException sex)
-                {
-                    Program.Log("Failed to decrypt BOSS file due to socket connection error.");
-                    sock.Close();
-                    return null;
+                    catch (SocketException sex)
+                    {
+                        Program.Log("Failed to decrypt BOSS file due to socket connection error.");
+                        sock.Close();
+                        return null;
+                    }
                 }
             }
             sock.Send(BitConverter.GetBytes(0xDEADCAFE));
