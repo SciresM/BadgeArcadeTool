@@ -28,10 +28,18 @@ namespace BadgeArcadeTool
             if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
         }
 
-        public static void Log(string msg)
+        public static void Log(string msg, bool newline = true)
         {
-            Console.WriteLine(msg);
-            log.WriteLine(msg);
+            if (newline)
+            {
+                Console.WriteLine(msg);
+                log.WriteLine(msg);
+            }
+            else
+            {
+                Console.Write(msg);
+                log.Write(msg);
+            }
         }
 
 
@@ -71,7 +79,6 @@ namespace BadgeArcadeTool
 
             foreach (var country in country_list.Keys)
             {
-                Log($"Checking {country}...");
                 var country_dir = Path.Combine("data", country);
                 var country_id = country_list[country];
                 CreateDirectoryIfNull(country_dir);
@@ -80,14 +87,21 @@ namespace BadgeArcadeTool
                     var archive_path = Path.Combine(country_dir, archive);
                     var sarc_path = Path.Combine(country_dir, Path.GetFileNameWithoutExtension(archive_path) + ".sarc");
                     var server_file = string.Format(server, country_id, archive);
+                    Log($"{country} / {archive}...", false);
                     if (!File.Exists(archive_path))
                     {
+                        Log("Downloading...", false);
                         var arc = NetworkUtils.TryDownload(server_file);
                         if (arc != null)
                         {
                             File.WriteAllBytes(archive_path, arc);
                             if (File.Exists(sarc_path))
                                 File.Delete(sarc_path);
+                        }
+                        else
+                        {
+                            Log("Download failed");
+                            continue;
                         }
                     }
                     else
@@ -96,6 +110,7 @@ namespace BadgeArcadeTool
                         var new_arc = NetworkUtils.DownloadFirstBytes(server_file);
                         if (!(new_arc.SequenceEqual(old.Take(new_arc.Length))))
                         {
+                            Log("Updating...", false);
                             var arc = NetworkUtils.TryDownload(server_file);
                             if (arc != null)
                             {
@@ -103,80 +118,89 @@ namespace BadgeArcadeTool
                                 if (File.Exists(sarc_path))
                                     File.Delete(sarc_path);
                             }
+                            else
+                            {
+                                Log("Update failed");
+                                continue;
+                            }
                         }
                     }
 
-                    if (!File.Exists(sarc_path) && passed_selftest)
+                    if (File.Exists(sarc_path) || !passed_selftest)
                     {
-                        keep_log = true;
-                        Log($"{country}'s {archive} is updated. Decrypting + Extracting...");
-                        var dec_boss = NetworkUtils.TryDecryptBOSS(File.ReadAllBytes(archive_path));
-                        if (dec_boss == null)
-                            continue;
-                        var sarcdata = dec_boss.Skip(0x296).ToArray();
-                        File.WriteAllBytes(sarc_path, sarcdata);
+                        Log("Done");
+                        continue;
+                    }
+                    keep_log = true;
+                    Log("Decrypting...", false);
+                    var dec_boss = NetworkUtils.TryDecryptBOSS(File.ReadAllBytes(archive_path));
+                    if (dec_boss == null)
+                        continue;
+                    var sarcdata = dec_boss.Skip(0x296).ToArray();
+                    File.WriteAllBytes(sarc_path, sarcdata);
 
-                        var sarc = SARC.Analyze(sarc_path);
+                    var sarc = SARC.Analyze(sarc_path);
 
-                        if (!sarc.valid)
+                    if (!sarc.valid)
+                    {
+                        Log($"Not a valid SARC. Maybe bad decryption...?");
+                        passed_selftest = false;
+                        File.Delete(sarc_path);
+                        continue;
+                    }
+
+                    Log($"Extracting...");
+
+                    var data_dir = Path.Combine(country_dir, "files");
+                    CreateDirectoryIfNull(data_dir);
+
+                    foreach (var entry in sarc.SFat.Entries)
+                    {
+                        var sb = new StringBuilder();
+                        var ofs = sarc.SFnt.StringOffset + (entry.FileNameOffset & 0xFFFFFF)*4;
+                        while (sarcdata[ofs] != 0)
                         {
-                            Log($"{country}'s {archive} isn't a valid SARC. Maybe bad decryption...?");
-                            passed_selftest = false;
-                            File.Delete(sarc_path);
-                            continue;
+                            sb.Append((char) sarcdata[ofs++]);
                         }
+                        var path = Path.Combine(data_dir, sb.ToString().Replace('/', Path.DirectorySeparatorChar));
+                        var len = entry.FileDataEnd - entry.FileDataStart;
+                        var data = new byte[len];
+                        Array.Copy(sarcdata, entry.FileDataStart + sarc.DataOffset, data, 0, len);
 
-                        var data_dir = Path.Combine(country_dir, "files");
-                        CreateDirectoryIfNull(data_dir);
-
-                        foreach (var entry in sarc.SFat.Entries)
+                        CreateDirectoryIfNull(Path.GetDirectoryName(path));
+                        if (!File.Exists(path))
                         {
-                            var sb = new StringBuilder();
-                            var ofs = sarc.SFnt.StringOffset + (entry.FileNameOffset & 0xFFFFFF)*4;
-                            while (sarcdata[ofs] != 0)
-                            {
-                                sb.Append((char) sarcdata[ofs++]);
-                            }
-                            var path = Path.Combine(data_dir, sb.ToString().Replace('/', Path.DirectorySeparatorChar));
-                            var len = entry.FileDataEnd - entry.FileDataStart;
-                            var data = new byte[len];
-                            Array.Copy(sarcdata, entry.FileDataStart + sarc.DataOffset, data, 0, len);
+                            Log($"New {country} file: {Path.GetFileName(path)}");
+                            File.WriteAllBytes(path, data);
 
-                            CreateDirectoryIfNull(Path.GetDirectoryName(path));
-                            if (!File.Exists(path))
+                            if (Path.GetFileName(path).StartsWith("Pr_") && BitConverter.ToUInt32(data, 0) == 0x307A6159) // 'Yaz0'
                             {
-                                Log($"New {country} file: {Path.GetFileName(path)}");
-                                File.WriteAllBytes(path, data);
-
-                                if (Path.GetFileName(path).StartsWith("Pr_") && BitConverter.ToUInt32(data, 0) == 0x307A6159) // 'Yaz0'
+                                var prbdata = SARC.Yaz0_Decompress(data);
+                                if (BitConverter.ToUInt32(prbdata, 0) == 0x53425250) // 'PRBS'
                                 {
-                                    var prbdata = SARC.Yaz0_Decompress(data);
-                                    if (BitConverter.ToUInt32(prbdata, 0) == 0x53425250) // 'PRBS'
+                                    var prb = new PRBS(prbdata);
+                                    var png_dir = Path.Combine(Path.Combine("png", country), prb.CategoryName);
+                                    CreateDirectoryIfNull(png_dir);
+                                    using (var bmp = prb.GetImage())
+                                        bmp.Save(Path.GetFullPath(Path.Combine(png_dir, prb.ImageName + ".png")), ImageFormat.Png);
+                                    if (prb.NumTiles > 1)
                                     {
-                                        var prb = new PRBS(prbdata);
-                                        var png_dir = Path.Combine(Path.Combine("png", country), prb.CategoryName);
-                                        CreateDirectoryIfNull(png_dir);
-                                        using (var bmp = prb.GetImage())
-                                            bmp.Save(Path.GetFullPath(Path.Combine(png_dir, prb.ImageName + ".png")), ImageFormat.Png);
-                                        if (prb.NumTiles > 1)
+                                        using (var ptile = prb.GetTile(0))
+                                            ptile.Save(Path.GetFullPath(Path.Combine(png_dir, prb.ImageName + ".downsampledpreview.png")), ImageFormat.Png);
+                                        for (var i = 0; i < prb.NumTiles; i++)
                                         {
-                                            using (var ptile = prb.GetTile(0))
-                                                ptile.Save(Path.GetFullPath(Path.Combine(png_dir, prb.ImageName + ".downsampledpreview.png")), ImageFormat.Png);
-                                            for (var i = 0; i < prb.NumTiles; i++)
-                                            {
-                                                using (var tile = prb.GetTile(i+1))
-                                                    tile.Save(Path.GetFullPath(Path.Combine(png_dir, prb.ImageName + $".tile_{i}.png")), ImageFormat.Png);
-                                            }
+                                            using (var tile = prb.GetTile(i+1))
+                                                tile.Save(Path.GetFullPath(Path.Combine(png_dir, prb.ImageName + $".tile_{i}.png")), ImageFormat.Png);
                                         }
-
-                                        Log($"Saved {country} images for {prb.ImageName}.");
                                     }
+
+                                    Log($"Saved {country} images for {prb.ImageName}.");
                                 }
                             }
-                            
                         }
-
+                            
                     }
+                    Log($"{country} / {archive}...Extraction Complete");
                 }
             }
         }
