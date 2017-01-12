@@ -23,11 +23,6 @@ namespace BadgeArcadeTool
         private static bool keep_log = false;
         private static StreamWriter log;
 
-        static void CreateDirectoryIfNull(string dir)
-        {
-            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-        }
-
         public static void Log(string msg, bool newline = true)
         {
             if (newline)
@@ -45,9 +40,9 @@ namespace BadgeArcadeTool
 
         static void Main(string[] args)
         {
-            CreateDirectoryIfNull("logs");
-            CreateDirectoryIfNull("data");
-            CreateDirectoryIfNull("badges");
+            Directory.CreateDirectory("logs");
+            Directory.CreateDirectory("data");
+            Directory.CreateDirectory("badges");
             var logFile = $"logs/{now.ToString("MMMM dd, yyyy - HH-mm-ss")}.log";
             log = new StreamWriter(logFile, false, Encoding.Unicode);
 
@@ -81,7 +76,7 @@ namespace BadgeArcadeTool
             {
                 var country_dir = Path.Combine("data", country);
                 var country_id = country_list[country];
-                CreateDirectoryIfNull(country_dir);
+                Directory.CreateDirectory(country_dir);
                 foreach (var archive in badge_filelist)
                 {
                     var archive_path = Path.Combine(country_dir, archive);
@@ -169,8 +164,8 @@ namespace BadgeArcadeTool
 
                     var data_dir = Path.Combine(country_dir, "files");
                     var decompressed_data_dir = Path.Combine(country_dir, "decompressed");
-                    CreateDirectoryIfNull(data_dir);
-                    CreateDirectoryIfNull(decompressed_data_dir);
+                    Directory.CreateDirectory(data_dir);
+                    Directory.CreateDirectory(decompressed_data_dir);
 
                     foreach (var entry in sarc.SFat.Entries)
                     {
@@ -179,8 +174,8 @@ namespace BadgeArcadeTool
                         var decompressed_path = Path.Combine(decompressed_data_dir, 
                             Path.ChangeExtension(sarc.GetFilePath(entry),null));
 
-                        CreateDirectoryIfNull(Path.GetDirectoryName(path));
-                        CreateDirectoryIfNull(Path.GetDirectoryName(decompressed_path));
+                        Directory.CreateDirectory(Path.GetDirectoryName(path));
+                        Directory.CreateDirectory(Path.GetDirectoryName(decompressed_path));
                         if (!File.Exists(path))
                         {
                             Log($"New {country} file: {Path.GetFileName(path)}");
@@ -195,9 +190,9 @@ namespace BadgeArcadeTool
                                 var png_dir_full = Path.Combine("png",Path.Combine(Path.Combine("full", country), prb.CategoryName));
                                 var png_dir_tiles = Path.Combine("png", Path.Combine(Path.Combine("tiles", country), prb.CategoryName));
                                 var png_dir_downsampled = Path.Combine("png", Path.Combine(Path.Combine("downsampled", country), prb.CategoryName));
-                                CreateDirectoryIfNull(png_dir_full);
-                                CreateDirectoryIfNull(png_dir_tiles);
-                                CreateDirectoryIfNull(png_dir_downsampled);
+                                Directory.CreateDirectory(png_dir_full);
+                                Directory.CreateDirectory(png_dir_tiles);
+                                Directory.CreateDirectory(png_dir_downsampled);
                                 using (var bmp = prb.GetImage())
                                 {
                                     bmp.Save(Path.GetFullPath(Path.Combine(png_dir_full, prb.ImageName + ".png")),
