@@ -1,9 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
+using static System.String;
 
 namespace BadgeArcadeTool
 {
@@ -17,7 +16,7 @@ namespace BadgeArcadeTool
         public uint Unknown;
         public SFAT SFat;
         public SFNT SFnt;
-        public byte[] data;
+        public byte[] Data;
 
         public string FileName;
         public string FilePath;
@@ -47,55 +46,60 @@ namespace BadgeArcadeTool
                 sarc.FileSize = br.ReadUInt32();
                 sarc.DataOffset = br.ReadUInt32();
                 sarc.Unknown = br.ReadUInt32();
-                sarc.SFat = new SFAT();
-                sarc.SFat.Signature = new string(br.ReadChars(4));
+                sarc.SFat = new SFAT
+                {
+                    Signature = new string(br.ReadChars(4)),
+                    HeaderSize = br.ReadUInt16(),
+                    EntryCount = br.ReadUInt16(),
+                    HashMult = br.ReadUInt32(),
+                    Entries = new List<SFATEntry>()
+                };
                 if (sarc.SFat.Signature != "SFAT")
                 {
                     sarc.valid = false;
                     return sarc;
                 }
-                sarc.SFat.HeaderSize = br.ReadUInt16();
-                sarc.SFat.EntryCount = br.ReadUInt16();
-                sarc.SFat.HashMult = br.ReadUInt32();
-                sarc.SFat.Entries = new List<SFATEntry>();
-                for (int i = 0; i < sarc.SFat.EntryCount; i++)
+                for (var i = 0; i < sarc.SFat.EntryCount; i++)
                 {
-                    var s = new SFATEntry();
-                    s.FileNameHash = br.ReadUInt32();
-                    s.FileNameOffset = br.ReadUInt32();
-                    s.FileDataStart = br.ReadUInt32();
-                    s.FileDataEnd = br.ReadUInt32();
+                    var s = new SFATEntry
+                    {
+                        FileNameHash = br.ReadUInt32(),
+                        FileNameOffset = br.ReadUInt32(),
+                        FileDataStart = br.ReadUInt32(),
+                        FileDataEnd = br.ReadUInt32()
+                    };
                     sarc.SFat.Entries.Add(s);
                 }
-                sarc.SFnt = new SFNT();
-                sarc.SFnt.Signature = new string(br.ReadChars(4));
+                sarc.SFnt = new SFNT
+                {
+                    Signature = new string(br.ReadChars(4)),
+                    HeaderSize = br.ReadUInt16(),
+                    Unknown = br.ReadUInt16(),
+                    StringOffset = (uint)br.BaseStream.Position
+                };
                 if (sarc.SFnt.Signature != "SFNT")
                 {
                     sarc.valid = false;
                     return sarc;
                 }
-                sarc.SFnt.HeaderSize = br.ReadUInt16();
-                sarc.SFnt.Unknown = br.ReadUInt16();
-                sarc.SFnt.StringOffset = (uint)br.BaseStream.Position;
 
             }
-            sarc.data = File.ReadAllBytes(path);
-            if (sarc.FileSize != sarc.data.Length)
-            {
-                sarc.valid = false;
-                sarc.data = null;
-            }
+            sarc.Data = File.ReadAllBytes(path);
+            if (sarc.FileSize == sarc.Data.Length) return sarc;
+
+            sarc.valid = false;
+            sarc.Data = null;
             return sarc;
         }
 
         public string GetFilePath(SFATEntry entry)
         {
-            if (!valid) return String.Empty;
+            if (!valid) return Empty;
             var sb = new StringBuilder();
             var ofs = SFnt.StringOffset + (entry.FileNameOffset & 0xFFFFFF) * 4;
-            while (data[ofs] != 0)
+            while (Data[ofs] != 0)
             {
-                sb.Append((char)data[ofs++]);
+                sb.Append((char)Data[ofs++]);
             }
 
             return sb.ToString().Replace('/', Path.DirectorySeparatorChar);
@@ -105,9 +109,9 @@ namespace BadgeArcadeTool
         {
             if (!valid) return null;
             var len = entry.FileDataEnd - entry.FileDataStart;
-            var data = new byte[len];
-            Array.Copy(this.data, entry.FileDataStart + DataOffset, data, 0, len);
-            return data;
+            var d = new byte[len];
+            Array.Copy(Data, entry.FileDataStart + DataOffset, d, 0, len);
+            return d;
         }
 
         public byte[] GetDecompressedData(SFATEntry entry)
@@ -120,24 +124,24 @@ namespace BadgeArcadeTool
         }
 
 
-        public static byte[] Yaz0_Decompress(byte[] Data)
+        public static byte[] Yaz0_Decompress(byte[] data)
         {
-            var len = (uint)(Data[4] << 24 | Data[5] << 16 | Data[6] << 8 | Data[7]);
+            var len = (uint)(data[4] << 24 | data[5] << 16 | data[6] << 8 | data[7]);
             var result = new byte[len];
             var Offs = 16;
             var dstoffs = 0;
             while (true)
             {
-                var header = Data[Offs++];
+                var header = data[Offs++];
                 for (var i = 0; i < 8; i++)
                 {
-                    if ((header & 0x80) != 0) result[dstoffs++] = Data[Offs++];
+                    if ((header & 0x80) != 0) result[dstoffs++] = data[Offs++];
                     else
                     {
-                        var b = Data[Offs++];
-                        var offs = ((b & 0xF) << 8 | Data[Offs++]) + 1;
+                        var b = data[Offs++];
+                        var offs = ((b & 0xF) << 8 | data[Offs++]) + 1;
                         var length = (b >> 4) + 2;
-                        if (length == 2) length = Data[Offs++] + 0x12;
+                        if (length == 2) length = data[Offs++] + 0x12;
                         for (var j = 0; j < length; j++)
                         {
                             result[dstoffs] = result[dstoffs - offs];
