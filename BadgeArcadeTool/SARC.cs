@@ -17,6 +17,7 @@ namespace BadgeArcadeTool
         public uint Unknown;
         public SFAT SFat;
         public SFNT SFnt;
+        public byte[] data;
 
         public string FileName;
         public string FilePath;
@@ -78,8 +79,46 @@ namespace BadgeArcadeTool
                 sarc.SFnt.StringOffset = (uint)br.BaseStream.Position;
 
             }
+            sarc.data = File.ReadAllBytes(path);
+            if (sarc.FileSize != sarc.data.Length)
+            {
+                sarc.valid = false;
+                sarc.data = null;
+            }
             return sarc;
         }
+
+        public string GetFilePath(SFATEntry entry)
+        {
+            if (!valid) return String.Empty;
+            var sb = new StringBuilder();
+            var ofs = SFnt.StringOffset + (entry.FileNameOffset & 0xFFFFFF) * 4;
+            while (data[ofs] != 0)
+            {
+                sb.Append((char)data[ofs++]);
+            }
+
+            return sb.ToString().Replace('/', Path.DirectorySeparatorChar);
+        }
+
+        public byte[] GetFileData(SFATEntry entry)
+        {
+            if (!valid) return null;
+            var len = entry.FileDataEnd - entry.FileDataStart;
+            var data = new byte[len];
+            Array.Copy(this.data, entry.FileDataStart + DataOffset, data, 0, len);
+            return data;
+        }
+
+        public byte[] GetDecompressedData(SFATEntry entry)
+        {
+            if (!valid) return null;
+            var d = GetFileData(entry);
+            return BitConverter.ToUInt32(d, 0) == 0x307A6159 
+                ? Yaz0_Decompress(d) 
+                : d;
+        }
+
 
         public static byte[] Yaz0_Decompress(byte[] Data)
         {
