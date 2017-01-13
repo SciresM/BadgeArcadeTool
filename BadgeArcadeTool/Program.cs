@@ -176,10 +176,13 @@ namespace BadgeArcadeTool
 
                         Directory.CreateDirectory(Path.GetDirectoryName(path));
                         Directory.CreateDirectory(Path.GetDirectoryName(decompressed_path));
+
+                        var file_data = sarc.GetFileData(entry);
+
                         if (!File.Exists(path))
                         {
                             Log($"New {country} file: {Path.GetFileName(path)}");
-                            File.WriteAllBytes(path, sarc.GetFileData(entry));
+                            File.WriteAllBytes(path, file_data);
 
                             var prbdata = sarc.GetDecompressedData(entry);
                             File.WriteAllBytes(decompressed_path, prbdata);
@@ -222,7 +225,23 @@ namespace BadgeArcadeTool
                                 Log($"Saved {country} images for {prb.ImageName}.");
                             }
                         }
-                            
+                        else
+                        {
+                            var old_data = File.ReadAllBytes(path);
+                            var data_update = old_data.Length != file_data.Length;
+                            for (var i = 0; i < file_data.Length; i++)
+                            {
+                                if (file_data[i] != old_data[i])
+                                    data_update = true;
+                                if (data_update)
+                                    break;
+                            }
+                            if (!data_update) continue;
+                            Log($"Updated {country} file: {Path.GetFileName(path)}");
+
+                            // Do nothing for updated files.
+                        }
+
                     }
                     Log($"{country} / {archive}...Extraction Complete");
                 }
