@@ -14,8 +14,6 @@ namespace BadgeArcadeTool
 {
     class Program
     {
-        
-
         public static DateTime now = DateTime.Now;
         private static string server = "https://npdl.cdn.nintendowifi.net/p01/nsa/{0}/data/{1}?tm=2";
         private const string US_ID = "OvbmGLZ9senvgV3K";

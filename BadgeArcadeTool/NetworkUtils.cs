@@ -155,7 +155,9 @@ namespace BadgeArcadeTool
 
             try
             {
-                var pingresult = new Ping().Send(crypto_ip, 2000).Status == IPStatus.Success;
+                var pingresult =
+                    new Ping().Send(crypto_ip_arg == default(IPAddress) ? crypto_ip : crypto_ip_arg, 2000).Status ==
+                    IPStatus.Success;
                 if (!pingresult)
                 {
                     Program.Log("Crypto Server selftest failed due to server being offline.");
