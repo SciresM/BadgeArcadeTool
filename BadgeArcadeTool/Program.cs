@@ -23,6 +23,7 @@ namespace BadgeArcadeTool
         private static readonly Dictionary<string, string> country_list = new Dictionary<string, string>() { {"US", US_ID}, {"JP", JP_ID}, {"EU", EU_ID} }; 
         private static bool keep_log = false;
         private static StreamWriter log;
+        private static SARC sarc;
 
         public static void Log(string msg, bool newline = true)
         {
@@ -71,6 +72,54 @@ namespace BadgeArcadeTool
             if (!keep_log)
                 File.Delete(logFile);
         }
+
+        static void WriteSARCFileData(Options opts, SFATEntry entry, string country, string path, string decompressed_path)
+        {
+
+            File.WriteAllBytes(path, sarc.GetFileData(entry));
+
+            var prbdata = sarc.GetDecompressedData(entry);
+            File.WriteAllBytes(decompressed_path, prbdata);
+
+            if (BitConverter.ToUInt32(prbdata, 0) == 0x53425250) // 'PRBS'
+            {
+                var prb = new PRBS(prbdata);
+                var png_dir_full = Path.Combine("png", Path.Combine(Path.Combine("full", country), prb.CategoryName));
+                var png_dir_tiles = Path.Combine("png", Path.Combine(Path.Combine("tiles", country), prb.CategoryName));
+                var png_dir_downsampled = Path.Combine("png", Path.Combine(Path.Combine("downsampled", country), prb.CategoryName));
+                Directory.CreateDirectory(png_dir_full);
+                Directory.CreateDirectory(png_dir_tiles);
+                Directory.CreateDirectory(png_dir_downsampled);
+                using (var bmp = prb.GetImage())
+                {
+                    bmp.Save(Path.GetFullPath(Path.Combine(png_dir_full, prb.ImageName + ".png")),
+                        ImageFormat.Png);
+
+                    if (prb.NumTiles == 1)
+                    {
+                        bmp.Save(
+                            Path.GetFullPath(Path.Combine(png_dir_tiles, prb.ImageName + ".png")),
+                            ImageFormat.Png);
+                        bmp.Save(
+                            Path.GetFullPath(Path.Combine(png_dir_downsampled, prb.ImageName + ".png")),
+                            ImageFormat.Png);
+                    }
+                }
+                if (prb.NumTiles > 1)
+                {
+                    using (var ptile = prb.GetTile(0))
+                        ptile.Save(Path.GetFullPath(Path.Combine(png_dir_downsampled, prb.ImageName + ".downsampledpreview.png")), ImageFormat.Png);
+                    for (var i = 0; i < prb.NumTiles; i++)
+                    {
+                        using (var tile = prb.GetTile(i + 1))
+                            tile.Save(Path.GetFullPath(Path.Combine(png_dir_tiles, prb.ImageName + $".tile_{i}.png")), ImageFormat.Png);
+                    }
+                }
+
+                Log($"Saved {country} images for {prb.ImageName}.");
+            }
+        }
+
 
         static void UpdateArchives(Options opts)
         {
@@ -127,7 +176,6 @@ namespace BadgeArcadeTool
                         }
                     }
 
-                    SARC sarc;
                     if (!File.Exists(sarc_path) && passed_selftest)
                     {
                         keep_log = true;
@@ -186,48 +234,7 @@ namespace BadgeArcadeTool
                         if (!File.Exists(path))
                         {
                             Log($"New {country} file: {Path.GetFileName(path)}");
-                            File.WriteAllBytes(path, file_data);
-
-                            var prbdata = sarc.GetDecompressedData(entry);
-                            File.WriteAllBytes(decompressed_path, prbdata);
-
-                            if (BitConverter.ToUInt32(prbdata, 0) == 0x53425250) // 'PRBS'
-                            {
-                                var prb = new PRBS(prbdata);
-                                var png_dir_full = Path.Combine("png",Path.Combine(Path.Combine("full", country), prb.CategoryName));
-                                var png_dir_tiles = Path.Combine("png", Path.Combine(Path.Combine("tiles", country), prb.CategoryName));
-                                var png_dir_downsampled = Path.Combine("png", Path.Combine(Path.Combine("downsampled", country), prb.CategoryName));
-                                Directory.CreateDirectory(png_dir_full);
-                                Directory.CreateDirectory(png_dir_tiles);
-                                Directory.CreateDirectory(png_dir_downsampled);
-                                using (var bmp = prb.GetImage())
-                                {
-                                    bmp.Save(Path.GetFullPath(Path.Combine(png_dir_full, prb.ImageName + ".png")),
-                                        ImageFormat.Png);
-
-                                    if (prb.NumTiles == 1)
-                                    {
-                                        bmp.Save(
-                                            Path.GetFullPath(Path.Combine(png_dir_tiles, prb.ImageName + ".png")),
-                                            ImageFormat.Png);
-                                        bmp.Save(
-                                            Path.GetFullPath(Path.Combine(png_dir_downsampled, prb.ImageName + ".png")),
-                                            ImageFormat.Png);
-                                    }
-                                }
-                                if (prb.NumTiles > 1)
-                                {
-                                    using (var ptile = prb.GetTile(0))
-                                        ptile.Save(Path.GetFullPath(Path.Combine(png_dir_downsampled, prb.ImageName + ".downsampledpreview.png")), ImageFormat.Png);
-                                    for (var i = 0; i < prb.NumTiles; i++)
-                                    {
-                                        using (var tile = prb.GetTile(i+1))
-                                            tile.Save(Path.GetFullPath(Path.Combine(png_dir_tiles, prb.ImageName + $".tile_{i}.png")), ImageFormat.Png);
-                                    }
-                                }
-
-                                Log($"Saved {country} images for {prb.ImageName}.");
-                            }
+                            WriteSARCFileData(opts, entry, country, path, decompressed_path);
                         }
                         else
                         {
@@ -243,7 +250,9 @@ namespace BadgeArcadeTool
                             if (!data_update) continue;
                             Log($"Updated {country} file: {Path.GetFileName(path)}");
 
-                            // Do nothing for updated files.
+                            //Can't do nothing for updated files, 
+                            //or the file will ALWAYS say its updated every run, not the intended result.
+                            WriteSARCFileData(opts, entry, country, path, decompressed_path);
                         }
 
                     }
