@@ -8,11 +8,14 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
+using CommandLine;
 
 namespace BadgeArcadeTool
 {
     class Program
     {
+        
+
         public static DateTime now = DateTime.Now;
         private static string server = "https://npdl.cdn.nintendowifi.net/p01/nsa/{0}/data/{1}?tm=2";
         private const string US_ID = "OvbmGLZ9senvgV3K";
@@ -22,11 +25,6 @@ namespace BadgeArcadeTool
         private static readonly Dictionary<string, string> country_list = new Dictionary<string, string>() { {"US", US_ID}, {"JP", JP_ID}, {"EU", EU_ID} }; 
         private static bool keep_log = false;
         private static StreamWriter log;
-
-        static void CreateDirectoryIfNull(string dir)
-        {
-            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-        }
 
         public static void Log(string msg, bool newline = true)
         {
@@ -45,9 +43,13 @@ namespace BadgeArcadeTool
 
         static void Main(string[] args)
         {
-            CreateDirectoryIfNull("logs");
-            CreateDirectoryIfNull("data");
-            CreateDirectoryIfNull("badges");
+            var parser = new Parser();
+            var options = new Options();
+            parser.ParseArguments(args, options);
+
+            Directory.CreateDirectory("logs");
+            Directory.CreateDirectory("data");
+            Directory.CreateDirectory("badges");
             var logFile = $"logs/{now.ToString("MMMM dd, yyyy - HH-mm-ss")}.log";
             log = new StreamWriter(logFile, false, Encoding.Unicode);
 
@@ -59,7 +61,7 @@ namespace BadgeArcadeTool
 
             try
             {
-                UpdateArchives();
+                UpdateArchives(options);
             }
             catch (Exception ex)
             {
@@ -72,16 +74,16 @@ namespace BadgeArcadeTool
                 File.Delete(logFile);
         }
 
-        static void UpdateArchives()
+        static void UpdateArchives(Options opts)
         {
             Log("Testing Crypto Server...");
-            var passed_selftest = NetworkUtils.TestCryptoServer();
+            var passed_selftest = NetworkUtils.TestCryptoServer(IPAddress.Parse(opts.InputIP));
 
             foreach (var country in country_list.Keys)
             {
                 var country_dir = Path.Combine("data", country);
                 var country_id = country_list[country];
-                CreateDirectoryIfNull(country_dir);
+                Directory.CreateDirectory(country_dir);
                 foreach (var archive in badge_filelist)
                 {
                     var archive_path = Path.Combine(country_dir, archive);
@@ -133,7 +135,7 @@ namespace BadgeArcadeTool
                     }
                     keep_log = true;
                     Log("Decrypting...", false);
-                    var dec_boss = NetworkUtils.TryDecryptBOSS(File.ReadAllBytes(archive_path));
+                    var dec_boss = NetworkUtils.TryDecryptBOSS(File.ReadAllBytes(archive_path), IPAddress.Parse(opts.InputIP));
                     if (dec_boss == null)
                         continue;
                     var sarcdata = dec_boss.Skip(0x296).ToArray();
@@ -152,7 +154,7 @@ namespace BadgeArcadeTool
                     Log($"Extracting...");
 
                     var data_dir = Path.Combine(country_dir, "files");
-                    CreateDirectoryIfNull(data_dir);
+                    Directory.CreateDirectory(data_dir);
 
                     foreach (var entry in sarc.SFat.Entries)
                     {
@@ -167,7 +169,7 @@ namespace BadgeArcadeTool
                         var data = new byte[len];
                         Array.Copy(sarcdata, entry.FileDataStart + sarc.DataOffset, data, 0, len);
 
-                        CreateDirectoryIfNull(Path.GetDirectoryName(path));
+                        Directory.CreateDirectory(Path.GetDirectoryName(path));
                         if (!File.Exists(path))
                         {
                             Log($"New {country} file: {Path.GetFileName(path)}");
@@ -180,7 +182,7 @@ namespace BadgeArcadeTool
                                 {
                                     var prb = new PRBS(prbdata);
                                     var png_dir = Path.Combine(Path.Combine("png", country), prb.CategoryName);
-                                    CreateDirectoryIfNull(png_dir);
+                                    Directory.CreateDirectory(png_dir);
                                     using (var bmp = prb.GetImage())
                                         bmp.Save(Path.GetFullPath(Path.Combine(png_dir, prb.ImageName + ".png")), ImageFormat.Png);
                                     if (prb.NumTiles > 1)
