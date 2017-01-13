@@ -73,7 +73,7 @@ namespace BadgeArcadeTool
             }
         }
 
-        public static byte[] TryDecryptBOSS(byte[] boss) // https://github.com/SciresM/3ds-crypto-server
+        public static byte[] TryDecryptBOSS(byte[] boss, IPAddress crypto_ip_arg = default(IPAddress)) // https://github.com/SciresM/3ds-crypto-server
         {
             var iv = new byte[0x10];
             Array.Copy(boss, 0x1C, iv, 0, 0xC);
@@ -87,7 +87,7 @@ namespace BadgeArcadeTool
             iv.CopyTo(metadata, 0x20);
 
             var sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            sock.Connect(crypto_ip, crypto_port);
+            sock.Connect(crypto_ip_arg == default(IPAddress) ? crypto_ip : crypto_ip_arg, crypto_port);
             sock.Send(metadata);
 
             var _bufsize = new byte[4];
@@ -136,7 +136,7 @@ namespace BadgeArcadeTool
             return dec;
         }
 
-        public static bool TestCryptoServer()
+        public static bool TestCryptoServer(IPAddress crypto_ip_arg = default(IPAddress))
         {
             var iv = new byte[0x10];
             var keyY = new byte[0x10];
@@ -164,7 +164,8 @@ namespace BadgeArcadeTool
 
                 var sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 
-                sock.Connect(crypto_ip, crypto_port);
+                sock.Connect(crypto_ip_arg == default(IPAddress) ? crypto_ip : crypto_ip_arg, crypto_port);
+
                 sock.Send(metadata);
 
                 var _bufsize = new byte[4];
