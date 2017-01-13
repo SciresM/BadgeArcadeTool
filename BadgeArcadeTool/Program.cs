@@ -215,8 +215,8 @@ namespace BadgeArcadeTool
 
                     Log($"Extracting...");
 
-                    var data_dir = Path.Combine(country_dir, "files");
-                    var decompressed_data_dir = Path.Combine(country_dir, "decompressed");
+                    var data_dir = Path.Combine(country_dir, Path.GetFileNameWithoutExtension(archive_path), "files");
+                    var decompressed_data_dir = Path.Combine(country_dir, Path.GetFileNameWithoutExtension(archive_path), "decompressed");
                     Directory.CreateDirectory(data_dir);
                     Directory.CreateDirectory(decompressed_data_dir);
 
