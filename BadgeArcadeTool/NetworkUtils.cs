@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Threading;
 
@@ -12,10 +13,11 @@ namespace BadgeArcadeTool
         public static int crypto_port = 8081;
         public static ProgressBar progress;
         public static byte[] download_data;
+        public static long boss_size;
 
         private static void DownloadProgressCallback(object sender, DownloadProgressChangedEventArgs e)
         {
-            progress.Report((double) e.BytesReceived/e.TotalBytesToReceive);
+            progress.Report((double) e.BytesReceived/boss_size);
         }
 
         public static byte[] TryDownload(string file)
@@ -24,6 +26,13 @@ namespace BadgeArcadeTool
             {
                 try
                 {
+                    //Sometimes the server refuses to disclose the file size, so progress bar shows as 0% until complete.
+                    //So, instead, lets extract the boss file size from the boss header.
+                    var header = DownloadFirstBytes(file);
+                    if (header == null || BitConverter.ToUInt64(header,0) != 0x0100010073736F62 ) return null;
+                    boss_size = header[8] << 24 | header[9] << 16 | header[10] << 8 | header[11];
+                   
+
                     var client = new WebClient();
                     client.DownloadProgressChanged += DownloadProgressCallback;
                     var dataTask = client.DownloadDataTaskAsync(file);
@@ -44,16 +53,23 @@ namespace BadgeArcadeTool
         public static byte[] DownloadFirstBytes(string file)
         {
             const int bytes = 0x400;
-            var req = (HttpWebRequest)WebRequest.Create(file);
-            req.AddRange(0, bytes - 1);
-
-            using (var resp = req.GetResponse())
-            using (var stream = resp.GetResponseStream())
+            try
             {
-                var buf = new byte[bytes];
-                var read = stream.Read(buf, 0, bytes);
-                Array.Resize(ref buf, read);
-                return buf;
+                var req = (HttpWebRequest) WebRequest.Create(file);
+                req.AddRange(0, bytes - 1);
+
+                using (var resp = req.GetResponse())
+                using (var stream = resp.GetResponseStream())
+                {
+                    var buf = new byte[bytes];
+                    var read = stream.Read(buf, 0, bytes);
+                    Array.Resize(ref buf, read);
+                    return buf;
+                }
+            }
+            catch (WebException wex)
+            {
+                return null;
             }
         }
 
@@ -139,7 +155,15 @@ namespace BadgeArcadeTool
 
             try
             {
+                var pingresult = new Ping().Send(crypto_ip, 2000).Status == IPStatus.Success;
+                if (!pingresult)
+                {
+                    Program.Log("Crypto Server selftest failed due to server being offline.");
+                    return false;
+                }
+
                 var sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+
                 sock.Connect(crypto_ip, crypto_port);
                 sock.Send(metadata);
 
@@ -175,12 +199,18 @@ namespace BadgeArcadeTool
                     Program.Log("Crypto Server test succeeded!");
                     return true;
                 }
-                Program.Log("Crypto Server test failed due to incorrect output. Check that the server is configured properly.");
+                Program.Log(
+                    "Crypto Server test failed due to incorrect output. Check that the server is configured properly.");
                 return false;
             }
             catch (SocketException sex)
             {
                 Program.Log($"Crypto Server selftest failed due to socket exception: {sex.Message}");
+                return false;
+            }
+            catch (PingException pex)
+            {
+                Program.Log($"Crypto Server selftest failed due to ping exception: {pex.Message}, Inner Exception: {pex.InnerException.Message}");
                 return false;
             }
         }
