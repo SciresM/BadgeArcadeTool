@@ -8,6 +8,8 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml;
+using System.Xml.Serialization;
 using CommandLine;
 
 namespace BadgeArcadeTool
@@ -22,23 +24,7 @@ namespace BadgeArcadeTool
         private static readonly string[] badge_filelist = {"allbadge_v130.dat", "allbadge_v131.dat"};
         private static readonly Dictionary<string, string> country_list = new Dictionary<string, string>() { {"US", US_ID}, {"JP", JP_ID}, {"EU", EU_ID} }; 
         private static bool keep_log = false;
-        private static StreamWriter log;
         private static SARC sarc;
-
-        public static void Log(string msg, bool newline = true)
-        {
-            if (newline)
-            {
-                Console.WriteLine(msg);
-                log.WriteLine(msg);
-            }
-            else
-            {
-                Console.Write(msg);
-                log.Write(msg);
-            }
-        }
-
 
         static void Main(string[] args)
         {
@@ -49,14 +35,12 @@ namespace BadgeArcadeTool
             Directory.CreateDirectory("logs");
             Directory.CreateDirectory("data");
             Directory.CreateDirectory("badges");
-            var logFile = $"logs/{now.ToString("MMMM dd, yyyy - HH-mm-ss")}.log";
-            log = new StreamWriter(logFile, false, Encoding.Unicode);
 
-            Log("BadgeArcadeTool v1.0 - SciresM");
-            Log($"{now.ToString("MMMM dd, yyyy - HH-mm-ss")}");
+            Util.NewLogFile("BadgeArcadeTool v1.0 - SciresM");
+            
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls;
             ServicePointManager.ServerCertificateValidationCallback = delegate { return true; };
-            Log("Installed certificate bypass.");
+            Util.Log("Installed certificate bypass.");
 
             try
             {
@@ -65,12 +49,10 @@ namespace BadgeArcadeTool
             catch (Exception ex)
             {
                 keep_log = true;
-                Log($"An exception occurred: {ex.Message}");
+                Util.Log($"An exception occurred: {ex.Message}");
             }
 
-            log.Close();
-            if (!keep_log)
-                File.Delete(logFile);
+            Util.CloseLogFile(keep_log);
         }
 
         static void WriteSARCFileData(Options opts, SFATEntry entry, string country, string path, string decompressed_path)
@@ -116,14 +98,14 @@ namespace BadgeArcadeTool
                     }
                 }
 
-                Log($"Saved {country} images for {prb.ImageName}.");
+                Util.Log($"Saved {country} images for {prb.ImageName}.");
             }
         }
 
 
         static void UpdateArchives(Options opts)
         {
-            Log("Testing Crypto Server...");
+            Util.Log("Testing Crypto Server...");
             var passed_selftest = NetworkUtils.TestCryptoServer(IPAddress.Parse(opts.InputIP));
 
             foreach (var country in country_list.Keys)
@@ -135,11 +117,12 @@ namespace BadgeArcadeTool
                 {
                     var archive_path = Path.Combine(country_dir, archive);
                     var sarc_path = Path.Combine(country_dir, Path.GetFileNameWithoutExtension(archive_path) + ".sarc");
+                    var xml_path = Path.Combine(country_dir, Path.GetFileNameWithoutExtension(archive_path) + ".xml");
                     var server_file = string.Format(server, country_id, archive);
-                    Log($"{country} / {archive}...", false);
+                    Util.Log($"{country} / {archive}...", false);
                     if (!File.Exists(archive_path))
                     {
-                        Log("Downloading...", false);
+                        Util.Log("Downloading...", false);
                         var arc = NetworkUtils.TryDownload(server_file);
                         if (arc != null)
                         {
@@ -149,7 +132,7 @@ namespace BadgeArcadeTool
                         }
                         else
                         {
-                            Log("Download failed");
+                            Util.Log("Download failed");
                             continue;
                         }
                     }
@@ -160,7 +143,7 @@ namespace BadgeArcadeTool
                         if (new_arc == null) continue;
                         if (!(new_arc.SequenceEqual(old.Take(new_arc.Length))))
                         {
-                            Log("Updating...", false);
+                            Util.Log("Updating...", false);
                             var arc = NetworkUtils.TryDownload(server_file);
                             if (arc != null)
                             {
@@ -170,7 +153,7 @@ namespace BadgeArcadeTool
                             }
                             else
                             {
-                                Log("Update failed");
+                                Util.Log("Update failed");
                                 continue;
                             }
                         }
@@ -179,7 +162,7 @@ namespace BadgeArcadeTool
                     if (!File.Exists(sarc_path) && passed_selftest)
                     {
                         keep_log = true;
-                        Log("Decrypting...", false);
+                        Util.Log("Decrypting...", false);
                         var dec_boss = NetworkUtils.TryDecryptBOSS(File.ReadAllBytes(archive_path), IPAddress.Parse(opts.InputIP));
                         if (dec_boss == null)
                             continue;
@@ -188,7 +171,7 @@ namespace BadgeArcadeTool
                         sarc = SARC.Analyze(sarc_path);
                         if (!sarc.valid)
                         {
-                            Log($"Not a valid SARC. Maybe bad decryption...?");
+                            Util.Log($"Not a valid SARC. Maybe bad decryption...?");
                             passed_selftest = false;
                             File.Delete(sarc_path);
                             continue;
@@ -196,7 +179,7 @@ namespace BadgeArcadeTool
                     }
                     else if (!File.Exists(sarc_path))
                     {
-                        Log("Done");
+                        Util.Log("Done");
                         continue;
                     }
                     else
@@ -204,7 +187,7 @@ namespace BadgeArcadeTool
                         sarc = SARC.Analyze(sarc_path);
                         if (!sarc.valid)
                         {
-                            Log("SARC file corrupted");
+                            Util.Log("SARC file corrupted");
                             File.Delete(sarc_path);
                             continue;
                         }
@@ -213,7 +196,9 @@ namespace BadgeArcadeTool
                     
 
 
-                    Log($"Extracting...");
+                    Util.Log($"Extracting...");
+                    var sarchashes = Util.DeserializeFile<SARCFileHashes>(xml_path) ?? new SARCFileHashes();
+
 
                     var data_dir = Path.Combine(country_dir, Path.GetFileNameWithoutExtension(archive_path), "files");
                     var decompressed_data_dir = Path.Combine(country_dir, Path.GetFileNameWithoutExtension(archive_path), "decompressed");
@@ -230,25 +215,21 @@ namespace BadgeArcadeTool
                         Directory.CreateDirectory(Path.GetDirectoryName(path));
                         Directory.CreateDirectory(Path.GetDirectoryName(decompressed_path));
 
-                        var file_data = sarc.GetFileData(entry);
+                        var hashresult = sarchashes.IsHashEqual(sarc.GetFilePath(entry), sarc.GetFileHash(entry));
+                        sarchashes.SetHash(sarc.GetFilePath(entry), sarc.GetFileHash(entry));
                         if (!File.Exists(path))
                         {
-                            Log($"New {country} file: {Path.GetFileName(path)}");
+                            Util.Log(hashresult == SARCHashResult.NotFound
+                                ? $"New {country} file: {Path.GetFileName(path)}"
+                                : hashresult == SARCHashResult.Equal
+                                    ? $"{country} file: {Path.GetFileName(path)} was deleted"
+                                    : $"Updated {country} file: {Path.GetFileName(path)}");
                             WriteSARCFileData(opts, entry, country, path, decompressed_path);
                         }
                         else
                         {
-                            var old_data = File.ReadAllBytes(path);
-                            var data_update = old_data.Length != file_data.Length;
-                            for (var i = 0; i < file_data.Length; i++)
-                            {
-                                if (file_data[i] != old_data[i])
-                                    data_update = true;
-                                if (data_update)
-                                    break;
-                            }
-                            if (!data_update) continue;
-                            Log($"Updated {country} file: {Path.GetFileName(path)}");
+                            if (hashresult != SARCHashResult.NotEqual) continue;
+                            Util.Log($"Updated {country} file: {Path.GetFileName(path)}");
 
                             //Can't do nothing for updated files, 
                             //or the file will ALWAYS say its updated every run, not the intended result.
@@ -256,9 +237,43 @@ namespace BadgeArcadeTool
                         }
 
                     }
-                    Log($"{country} / {archive}...Extraction Complete");
+                    Util.Serialize(sarchashes, xml_path);
+                    Util.Log($"{country} / {archive}...Extraction Complete");
                 }
             }
         }
     }
+
+    [Serializable]
+    [XmlRoot("SARC File Hashes")]
+    public class SARCFileHashes
+    {
+        [XmlElement("Hashes")]
+        public SerializableDictionary<string, string> Hashes =
+            new SerializableDictionary<string, string>();
+
+        public SARCHashResult IsHashEqual(string filename, string hash)
+        {
+            string existinghash;
+            if (Hashes.TryGetValue(filename, out existinghash))
+            {
+                return hash == existinghash ? SARCHashResult.Equal : SARCHashResult.NotEqual;
+            }
+            return SARCHashResult.NotFound;
+        }
+
+        public void SetHash(string filename, string hash)
+        {
+            Hashes[filename] = hash;
+        }
+
+    }
+
+    public enum SARCHashResult
+    {
+        Equal,
+        NotEqual,
+        NotFound
+    }
+
 }

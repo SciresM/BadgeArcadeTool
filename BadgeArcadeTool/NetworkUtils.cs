@@ -125,7 +125,7 @@ namespace BadgeArcadeTool
                     }
                     catch (SocketException sex)
                     {
-                        Program.Log("Failed to decrypt BOSS file due to socket connection error.");
+                        Util.Log("Failed to decrypt BOSS file due to socket connection error.");
                         sock.Close();
                         return null;
                     }
@@ -160,7 +160,7 @@ namespace BadgeArcadeTool
                     IPStatus.Success;
                 if (!pingresult)
                 {
-                    Program.Log("Crypto Server selftest failed due to server being offline.");
+                    Util.Log("Crypto Server selftest failed due to server being offline.");
                     return false;
                 }
 
@@ -199,21 +199,21 @@ namespace BadgeArcadeTool
 
                 if (test_vector_dec.All(t => t == 0))
                 {
-                    Program.Log("Crypto Server test succeeded!");
+                    Util.Log("Crypto Server test succeeded!");
                     return true;
                 }
-                Program.Log(
+                Util.Log(
                     "Crypto Server test failed due to incorrect output. Check that the server is configured properly.");
                 return false;
             }
             catch (SocketException sex)
             {
-                Program.Log($"Crypto Server selftest failed due to socket exception: {sex.Message}");
+                Util.Log($"Crypto Server selftest failed due to socket exception: {sex.Message}");
                 return false;
             }
             catch (PingException pex)
             {
-                Program.Log($"Crypto Server selftest failed due to ping exception: {pex.Message}, Inner Exception: {pex.InnerException.Message}");
+                Util.Log($"Crypto Server selftest failed due to ping exception: {pex.Message}, Inner Exception: {pex.InnerException.Message}");
                 return false;
             }
         }
