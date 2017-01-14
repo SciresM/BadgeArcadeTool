@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.ExceptionServices;
+using System.Security.Cryptography;
 using System.Text;
 using static System.String;
 
@@ -103,6 +105,16 @@ namespace BadgeArcadeTool
             }
 
             return sb.ToString().Replace('/', Path.DirectorySeparatorChar);
+        }
+
+        public string GetFileHash(SFATEntry entry)
+        {
+            var sha256 = SHA256.Create();
+            var hash = sha256.ComputeHash(GetFileData(entry));
+            var sb = new StringBuilder();
+            foreach (var t in hash)
+                sb.Append(t.ToString("X2"));
+            return sb.ToString();
         }
 
         public byte[] GetFileData(SFATEntry entry)
