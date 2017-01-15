@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Threading;
@@ -14,6 +15,16 @@ namespace BadgeArcadeTool
         public static ProgressBar progress;
         public static byte[] download_data;
         public static long boss_size;
+        public static SocketException sex;
+        public static WebException wex;
+        public static Exception ex;
+        
+
+        public static void SetCryptoIPAddress(IPAddress crypto_ip_arg = default(IPAddress))
+        {
+            if (crypto_ip_arg != default(IPAddress))
+                crypto_ip = crypto_ip_arg;
+        }
 
         private static void DownloadProgressCallback(object sender, DownloadProgressChangedEventArgs e)
         {
@@ -24,6 +35,7 @@ namespace BadgeArcadeTool
         {
             using (progress = new ProgressBar())
             {
+                wex = null;
                 try
                 {
                     //Sometimes the server refuses to disclose the file size, so progress bar shows as 0% until complete.
@@ -43,8 +55,9 @@ namespace BadgeArcadeTool
                     }
                     return dataTask.Result;
                 }
-                catch (WebException wex)
+                catch (WebException e)
                 {
+                    wex = e;
                     return null;
                 }
             }
@@ -52,6 +65,7 @@ namespace BadgeArcadeTool
 
         public static byte[] DownloadFirstBytes(string file)
         {
+            wex = null;
             const int bytes = 0x400;
             try
             {
@@ -67,107 +81,22 @@ namespace BadgeArcadeTool
                     return buf;
                 }
             }
-            catch (WebException wex)
+            catch (WebException e)
             {
+                wex = e;
                 return null;
             }
         }
 
-        public static byte[] TryDecryptBOSS(byte[] boss, IPAddress crypto_ip_arg = default(IPAddress)) // https://github.com/SciresM/3ds-crypto-server
+        private static byte[] DecryptData(byte[] metadata, byte[] data, int ofs)
         {
-            var iv = new byte[0x10];
-            Array.Copy(boss, 0x1C, iv, 0, 0xC);
-            iv[0xF] = 1;
-
-            var metadata = new byte[1024];
-            BitConverter.GetBytes(0xCAFEBABE).CopyTo(metadata, 0);
-            BitConverter.GetBytes(boss.Length - 0x28).CopyTo(metadata, 4);
-            BitConverter.GetBytes(3).CopyTo(metadata, 8);
-            BitConverter.GetBytes(3).CopyTo(metadata, 0xC);
-            iv.CopyTo(metadata, 0x20);
-
+            byte[] dec = null;
+            sex = null;
+            ex = null;
             var sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            sock.Connect(crypto_ip_arg == default(IPAddress) ? crypto_ip : crypto_ip_arg, crypto_port);
-            sock.Send(metadata);
-
-            var _bufsize = new byte[4];
-            sock.Receive(_bufsize);
-
-            var bufsize = BitConverter.ToInt32(_bufsize, 0);
-            sock.ReceiveBufferSize = bufsize;
-            sock.SendBufferSize = bufsize;
-
-            var dec = new byte[boss.Length];
-            boss.CopyTo(dec, 0);
-            var ofs = 0x28;
-            var i = 0;
-            var tot = dec.Length / bufsize;
-            using (var progress = new ProgressBar())
-            {
-                while (ofs < boss.Length)
-                {
-                    var buf = new byte[ofs + bufsize < boss.Length ? bufsize : boss.Length - ofs];
-                    Array.Copy(boss, ofs, buf, 0, buf.Length);
-                    try
-                    {
-                        var s = sock.Send(buf);
-                        var r = buf.Length;
-                        while (r > 0)
-                        {
-                            var d = sock.Receive(buf);
-                            r -= d;
-                            Array.Copy(buf, 0, dec, ofs, d);
-                            ofs += d;
-                            Array.Resize(ref buf, r);
-                            progress.Report((double) ofs/boss.Length);
-                        }
-                        i++;
-                    }
-                    catch (SocketException sex)
-                    {
-                        Util.Log("Failed to decrypt BOSS file due to socket connection error.");
-                        sock.Close();
-                        return null;
-                    }
-                }
-            }
-            sock.Send(BitConverter.GetBytes(0xDEADCAFE));
-            sock.Close();
-            return dec;
-        }
-
-        public static bool TestCryptoServer(IPAddress crypto_ip_arg = default(IPAddress))
-        {
-            var iv = new byte[0x10];
-            var keyY = new byte[0x10];
-            var metadata = new byte[1024];
-            BitConverter.GetBytes(0xCAFEBABE).CopyTo(metadata, 0);
-            BitConverter.GetBytes(0x10).CopyTo(metadata, 4);
-            BitConverter.GetBytes(0x2C | 0x80 | 0x40).CopyTo(metadata, 8);
-            BitConverter.GetBytes(1).CopyTo(metadata, 0xC);
-            keyY.CopyTo(metadata, 0x10);
-            iv.CopyTo(metadata, 0x20);
-
-            var test_vector = new byte[] { 0xBC, 0xC4, 0x16, 0x2C, 0x2A, 0x06, 0x91, 0xEE, 0x47, 0x18, 0x86, 0xB8, 0xEB, 0x2F, 0xB5, 0x48 };
-            var test_vector_dec = new byte[0x10];
-            for (var i = 0; i < test_vector_dec.Length; i++)
-                test_vector_dec[i] = 0xFF;
-
             try
             {
-                var pingresult =
-                    new Ping().Send(crypto_ip_arg == default(IPAddress) ? crypto_ip : crypto_ip_arg, 2000).Status ==
-                    IPStatus.Success;
-                if (!pingresult)
-                {
-                    Util.Log("Crypto Server selftest failed due to server being offline.");
-                    return false;
-                }
-
-                var sock = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-
-                sock.Connect(crypto_ip_arg == default(IPAddress) ? crypto_ip : crypto_ip_arg, crypto_port);
-
+                sock.Connect(crypto_ip, crypto_port);
                 sock.Send(metadata);
 
                 var _bufsize = new byte[4];
@@ -177,27 +106,135 @@ namespace BadgeArcadeTool
                 sock.ReceiveBufferSize = bufsize;
                 sock.SendBufferSize = bufsize;
 
-                var ofs = 0;
-                while (ofs < test_vector.Length)
+                dec = new byte[data.Length];
+                data.CopyTo(dec, 0);
+                using (progress = new ProgressBar())
                 {
-                    var buf = new byte[ofs + bufsize < test_vector.Length ? bufsize : test_vector.Length - ofs];
-                    Array.Copy(test_vector, ofs, buf, 0, buf.Length);
-                    var s = sock.Send(buf);
-                    var r = buf.Length;
-                    while (r > 0)
+                    while (ofs < data.Length)
                     {
-                        var d = sock.Receive(buf);
-                        r -= d;
-                        Array.Copy(buf, 0, test_vector_dec, ofs, d);
-                        ofs += d;
-                        Array.Resize(ref buf, r);
+                        var buf = new byte[ofs + bufsize < data.Length ? bufsize : data.Length - ofs];
+                        Array.Copy(data, ofs, buf, 0, buf.Length);
+                        try
+                        {
+                            var s = sock.Send(buf);
+                            var r = buf.Length;
+                            while (r > 0)
+                            {
+                                var d = sock.Receive(buf);
+                                r -= d;
+                                Array.Copy(buf, 0, dec, ofs, d);
+                                ofs += d;
+                                Array.Resize(ref buf, r);
+                                progress.Report((double)ofs / data.Length);
+                            }
+                        }
+                        catch (SocketException e)
+                        {
+                            sex = e;
+                            sock.Close();
+                            return null;
+                        }
                     }
                 }
 
                 sock.Send(BitConverter.GetBytes(0xDEADCAFE));
+            }
+            catch (Exception e)
+            {
+                ex = e;
                 sock.Close();
+            }
 
-                if (test_vector_dec.All(t => t == 0))
+            return dec;
+        }
+
+        public enum CryptoMode
+        {
+            CBC_Enc,
+            CBC_Dec,
+            CTR_Enc,
+            CTR_Dec,
+            CCM_Enc,
+            CCM_Dec
+        }
+
+        public enum PSPXI_AES
+        {
+            ClCertA = 0,
+            UDS_WLAN,
+            MiiQR,
+            BOSS,
+            Unknown,
+            DownloadPlay,
+            StreetPass,
+            //Invalid = 7,
+            Friends = 8,
+            NFC
+        }
+
+        public static byte[] TryDecryptData(byte[] data, CryptoMode mode, PSPXI_AES pspxi, byte[] iv, int ofs = 0)
+        {
+            //return TryDecryptData(data, mode, (int) pspxi, iv, ofs);
+            var metadata = new byte[1024];
+            BitConverter.GetBytes(0xCAFEBABE).CopyTo(metadata, 0);
+            BitConverter.GetBytes(data.Length - ofs).CopyTo(metadata, 4);
+            BitConverter.GetBytes((int)pspxi).CopyTo(metadata, 8);
+            BitConverter.GetBytes((int)mode).CopyTo(metadata, 0x0C);
+            iv.CopyTo(metadata, 0x20);
+            return DecryptData(metadata, data, ofs);
+        }
+
+        public static byte[] TryDecryptData(byte[] data, CryptoMode mode, int keyslot, byte[] iv, int ofs = 0, byte[] keyY = null)
+        {
+            var metadata = new byte[1024];
+            BitConverter.GetBytes(0xCAFEBABE).CopyTo(metadata, 0);
+            BitConverter.GetBytes(data.Length - ofs).CopyTo(metadata, 4);
+            BitConverter.GetBytes((keyslot & 0x3F) | (keyY != null ? 0x40 : 0x00) | 0x80).CopyTo(metadata, 8);
+            BitConverter.GetBytes((int) mode).CopyTo(metadata, 0x0C);
+            keyY?.CopyTo(metadata, 0x10);
+            iv.CopyTo(metadata, 0x20);
+            return DecryptData(metadata, data, ofs);
+        }
+
+        public static byte[] TryDecryptBOSS(byte[] boss) // https://github.com/SciresM/3ds-crypto-server
+        {
+            var iv = new byte[0x10];
+            Array.Copy(boss, 0x1C, iv, 0, 0xC);
+            iv[0xF] = 1;
+
+            var dec = TryDecryptData(boss, CryptoMode.CTR_Dec, PSPXI_AES.BOSS, iv, 0x28);
+            if(dec == null)
+                Util.Log(sex == null
+                    ? $"Failed to decrypt BOSS file due to an exception: {ex}"
+                    : $"Failed to decrypt BOSS file due to a socket exception: {sex}");
+            return dec;
+        }
+
+        public static bool TestCryptoServer()
+        {
+            var iv = new byte[0x10];
+            var keyY = new byte[0x10];
+            var test_vector = new byte[] { 0xBC, 0xC4, 0x16, 0x2C, 0x2A, 0x06, 0x91, 0xEE, 0x47, 0x18, 0x86, 0xB8, 0xEB, 0x2F, 0xB5, 0x48 };
+            
+            try
+            {
+                var pingresult = new Ping().Send(crypto_ip, 2000).Status == IPStatus.Success;
+                if (!pingresult)
+                {
+                    Util.Log("Crypto Server selftest failed due to server being offline.");
+                    return false;
+                }
+                var dec = TryDecryptData(test_vector, CryptoMode.CBC_Dec, 0x2C, iv, 0, keyY);
+
+                if (dec == null)
+                {
+                    Util.Log(sex == null
+                        ? $"Crypto Server test failed due to an exception: {ex}"
+                        : $"Crypto Server test failed due to Socket Exception: {sex}");
+                    return false;
+                }
+
+                if (dec.All(t => t == 0) && dec.Length == 0x10)
                 {
                     Util.Log("Crypto Server test succeeded!");
                     return true;
@@ -206,16 +243,12 @@ namespace BadgeArcadeTool
                     "Crypto Server test failed due to incorrect output. Check that the server is configured properly.");
                 return false;
             }
-            catch (SocketException sex)
-            {
-                Util.Log($"Crypto Server selftest failed due to socket exception: {sex.Message}");
-                return false;
-            }
             catch (PingException pex)
             {
                 Util.Log($"Crypto Server selftest failed due to ping exception: {pex.Message}, Inner Exception: {pex.InnerException.Message}");
                 return false;
             }
+            
         }
     }
 }
