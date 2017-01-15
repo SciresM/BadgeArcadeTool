@@ -25,12 +25,13 @@ namespace BadgeArcadeTool
         private static readonly Dictionary<string, string> country_list = new Dictionary<string, string>() { {"US", US_ID}, {"JP", JP_ID}, {"EU", EU_ID} }; 
         private static bool keep_log = false;
         private static SARC sarc;
+        public static Options opts = new Options();
 
         static void Main(string[] args)
         {
             var parser = new Parser();
-            var options = new Options();
-            parser.ParseArguments(args, options);
+            parser.ParseArguments(args, opts);
+            NetworkUtils.SetCryptoIPAddress(IPAddress.Parse(opts.InputIP));
 
             Directory.CreateDirectory("logs");
             Directory.CreateDirectory("data");
@@ -44,7 +45,7 @@ namespace BadgeArcadeTool
 
             try
             {
-                UpdateArchives(options);
+                UpdateArchives();
             }
             catch (Exception ex)
             {
@@ -55,7 +56,7 @@ namespace BadgeArcadeTool
             Util.CloseLogFile(keep_log);
         }
 
-        static void WriteSARCFileData(Options opts, SFATEntry entry, string country, string path, string decompressed_path)
+        static void WriteSARCFileData(SFATEntry entry, string country, string path, string decompressed_path)
         {
 
             File.WriteAllBytes(path, sarc.GetFileData(entry));
@@ -103,10 +104,10 @@ namespace BadgeArcadeTool
         }
 
 
-        static void UpdateArchives(Options opts)
+        static void UpdateArchives()
         {
             Util.Log("Testing Crypto Server...");
-            var passed_selftest = NetworkUtils.TestCryptoServer(IPAddress.Parse(opts.InputIP));
+            var passed_selftest = NetworkUtils.TestCryptoServer();
 
             foreach (var country in country_list.Keys)
             {
@@ -163,7 +164,7 @@ namespace BadgeArcadeTool
                     {
                         keep_log = true;
                         Util.Log("Decrypting...", false);
-                        var dec_boss = NetworkUtils.TryDecryptBOSS(File.ReadAllBytes(archive_path), IPAddress.Parse(opts.InputIP));
+                        var dec_boss = NetworkUtils.TryDecryptBOSS(File.ReadAllBytes(archive_path));
                         if (dec_boss == null)
                             continue;
                         File.WriteAllBytes(sarc_path, dec_boss.Skip(0x296).ToArray());
@@ -224,7 +225,7 @@ namespace BadgeArcadeTool
                                 : hashresult == SARCHashResult.Equal
                                     ? $"{country} file: {Path.GetFileName(path)} was deleted"
                                     : $"Updated {country} file: {Path.GetFileName(path)}");
-                            WriteSARCFileData(opts, entry, country, path, decompressed_path);
+                            WriteSARCFileData(entry, country, path, decompressed_path);
                         }
                         else
                         {
@@ -233,7 +234,7 @@ namespace BadgeArcadeTool
 
                             //Can't do nothing for updated files, 
                             //or the file will ALWAYS say its updated every run, not the intended result.
-                            WriteSARCFileData(opts, entry, country, path, decompressed_path);
+                            WriteSARCFileData(entry, country, path, decompressed_path);
                         }
 
                     }
@@ -243,37 +244,4 @@ namespace BadgeArcadeTool
             }
         }
     }
-
-    [Serializable]
-    [XmlRoot("SARC File Hashes")]
-    public class SARCFileHashes
-    {
-        [XmlElement("Hashes")]
-        public SerializableDictionary<string, string> Hashes =
-            new SerializableDictionary<string, string>();
-
-        public SARCHashResult IsHashEqual(string filename, string hash)
-        {
-            string existinghash;
-            if (Hashes.TryGetValue(filename, out existinghash))
-            {
-                return hash == existinghash ? SARCHashResult.Equal : SARCHashResult.NotEqual;
-            }
-            return SARCHashResult.NotFound;
-        }
-
-        public void SetHash(string filename, string hash)
-        {
-            Hashes[filename] = hash;
-        }
-
-    }
-
-    public enum SARCHashResult
-    {
-        Equal,
-        NotEqual,
-        NotFound
-    }
-
 }
