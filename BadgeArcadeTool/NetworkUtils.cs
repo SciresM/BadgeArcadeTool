@@ -142,9 +142,8 @@ namespace BadgeArcadeTool
             catch (Exception e)
             {
                 ex = e;
-                sock.Close();
             }
-
+            sock.Close();
             return dec;
         }
 
