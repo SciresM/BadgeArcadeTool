@@ -38,9 +38,19 @@ namespace BadgeArcadeTool
                 ? new Options()
                 :Util.DeserializeFile<Options>("settings.xml") ?? new Options();
             
-            //Update the settings if necessary.
+            //Validate and Update the settings if necessary.
             if (!string.IsNullOrEmpty(opts.InputIP))
-                settings.InputIP = opts.InputIP;
+            {
+                IPAddress ipaddress;
+                if (IPAddress.TryParse(opts.InputIP, out ipaddress))
+                    settings.InputIP = opts.InputIP;
+                else
+                {
+                    Console.WriteLine(heading);
+                    Console.WriteLine($"Error: Invalid IP Address ({opts.InputIP})");
+                    return;
+                }
+            }
 
             //Set up default Settings if blank.
             if (string.IsNullOrEmpty(settings.InputIP))
