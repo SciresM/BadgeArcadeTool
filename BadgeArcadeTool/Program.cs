@@ -1,22 +1,15 @@
 ﻿using System;
-using System.CodeDom;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Net;
-using System.Text;
-using System.Threading.Tasks;
-using System.Xml;
-using System.Xml.Serialization;
 using CommandLine;
 
 namespace BadgeArcadeTool
 {
     class Program
     {
-        public static DateTime now = DateTime.Now;
         private static string server = "https://npdl.cdn.nintendowifi.net/p01/nsa/{0}/data/{1}?tm=2";
         private const string US_ID = "OvbmGLZ9senvgV3K";
         private const string JP_ID = "j0ITmVqVgfUxe0O9";
@@ -25,19 +18,43 @@ namespace BadgeArcadeTool
         private static readonly Dictionary<string, string> country_list = new Dictionary<string, string>() { {"US", US_ID}, {"JP", JP_ID}, {"EU", EU_ID} }; 
         private static bool keep_log = false;
         private static SARC sarc;
-        public static Options opts = new Options();
+        public static Options settings = new Options();
 
         static void Main(string[] args)
         {
+            var heading = "BadgeArcadeTool v1.0 - SciresM";
             var parser = new Parser();
-            parser.ParseArguments(args, opts);
-            NetworkUtils.SetCryptoIPAddress(IPAddress.Parse(opts.InputIP));
+            var opts = new Options();
+            
+            if (!parser.ParseArguments(args, opts) || opts.help)
+            {
+                Console.WriteLine(heading);
+                Console.WriteLine(opts.GetUsage());
+                return;
+            }
 
-            Directory.CreateDirectory("logs");
+            //Read settings.xml
+            settings = opts.Reset
+                ? new Options()
+                :Util.DeserializeFile<Options>("settings.xml") ?? new Options();
+            
+            //Update the settings if necessary.
+            if (!string.IsNullOrEmpty(opts.InputIP))
+                settings.InputIP = opts.InputIP;
+
+            //Set up default Settings if blank.
+            if (string.IsNullOrEmpty(settings.InputIP))
+                settings.InputIP = "192.168.1.137";
+
+            //Save the settings.
+            Util.Serialize(settings, "settings.xml");
+
+            NetworkUtils.SetCryptoIPAddress(IPAddress.Parse(settings.InputIP));
+
             Directory.CreateDirectory("data");
             Directory.CreateDirectory("badges");
 
-            Util.NewLogFile("BadgeArcadeTool v1.0 - SciresM");
+            Util.NewLogFile(heading);
             
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls;
             ServicePointManager.ServerCertificateValidationCallback = delegate { return true; };
@@ -106,7 +123,7 @@ namespace BadgeArcadeTool
 
         static void UpdateArchives()
         {
-            Util.Log("Testing Crypto Server...");
+            Util.Log($"Testing Crypto Server ({NetworkUtils.crypto_ip})...");
             var passed_selftest = NetworkUtils.TestCryptoServer();
 
             foreach (var country in country_list.Keys)

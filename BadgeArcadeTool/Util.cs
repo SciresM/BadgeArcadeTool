@@ -14,6 +14,8 @@ namespace BadgeArcadeTool
         public static void NewLogFile(string programname)
         {
             var now = DateTime.Now;
+
+            Directory.CreateDirectory("logs");
             logFile = $"logs/{now.ToString("MMMM dd, yyyy - HH-mm-ss")}.log";
             log = new StreamWriter(logFile, false, Encoding.Unicode);
             Log(programname);
