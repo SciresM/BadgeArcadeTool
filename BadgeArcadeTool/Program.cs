@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using CommandLine;
+using CTR;
 
 namespace BadgeArcadeTool
 {
@@ -58,8 +59,6 @@ namespace BadgeArcadeTool
 
             //Save the settings.
             Util.Serialize(settings, "settings.xml");
-
-            NetworkUtils.SetCryptoIPAddress(IPAddress.Parse(settings.InputIP));
 
             Directory.CreateDirectory("data");
             Directory.CreateDirectory("badges");
@@ -130,11 +129,29 @@ namespace BadgeArcadeTool
             }
         }
 
+        static bool SelfTest()
+        {
+            var Engine = new AesEngine();
+            var testBoss = ("0000000000000000000000000000000000000000000000000000000000000000" +
+                            "00000000000000004906070A85C541DF89F9A6574163130C6E4B0A341B1D93FE").ToByteArray();
+            var decBoss = Engine.DecryptBOSS(testBoss);
+
+            return decBoss.All(t => t == 0);
+        }
+
 
         static void UpdateArchives()
         {
-            Util.Log($"Testing Crypto Server ({NetworkUtils.crypto_ip})...");
-            var passed_selftest = NetworkUtils.TestCryptoServer();
+            var Engine = new AesEngine();
+            var passedSelftest = SelfTest();
+            if (passedSelftest)
+            {
+                Util.Log("Self test passed.");
+            }
+            else
+            {
+                Util.Log("Self test failed.");
+            }
 
             foreach (var country in country_list.Keys)
             {
@@ -187,11 +204,12 @@ namespace BadgeArcadeTool
                         }
                     }
 
-                    if (!File.Exists(sarc_path) && passed_selftest)
+                    
+                    if (!File.Exists(sarc_path) && passedSelftest)
                     {
                         keep_log = true;
                         Util.Log("Decrypting...", false);
-                        var dec_boss = NetworkUtils.TryDecryptBOSS(File.ReadAllBytes(archive_path));
+                        var dec_boss = Engine.DecryptBOSS(File.ReadAllBytes(archive_path));
                         if (dec_boss == null)
                             continue;
                         File.WriteAllBytes(sarc_path, dec_boss.Skip(0x296).ToArray());
@@ -199,8 +217,8 @@ namespace BadgeArcadeTool
                         sarc = SARC.Analyze(sarc_path);
                         if (!sarc.valid)
                         {
-                            Util.Log($"Not a valid SARC. Maybe bad decryption...?");
-                            passed_selftest = false;
+                            Util.Log($"Not a valid SARC. Maybe your build of CTRAesEngine is bad.");
+                            passedSelftest = false;
                             File.Delete(sarc_path);
                             continue;
                         }
@@ -263,7 +281,6 @@ namespace BadgeArcadeTool
                             //or the file will ALWAYS say its updated every run, not the intended result.
                             WriteSARCFileData(entry, country, path, decompressed_path);
                         }
-
                     }
                     Util.Serialize(sarchashes, xml_path);
                     Util.Log($"{country} / {archive}...Extraction Complete");
