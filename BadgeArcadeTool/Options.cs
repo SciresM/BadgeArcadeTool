@@ -14,9 +14,9 @@ namespace BadgeArcadeTool {
     [Serializable]
     public class Options {
 
-        [XmlAttribute("IP_Address")]
-        [Option('i', "ip", HelpText = "The IP address of the 3DS running the crypto server.", Required = false)]
-        public string InputIP { get; set; }
+        [XmlAttribute("BootRom")]
+        [Option('b', "boot9", HelpText = "Path and file name of the boot rom", Required = false)]
+        public string Boot9 { get; set; }
 
         [XmlIgnore]
         [Option('r',"reset",HelpText = "Reset all settings to Default")]

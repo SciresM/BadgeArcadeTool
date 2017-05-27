@@ -20,6 +20,7 @@ namespace BadgeArcadeTool
         private static bool keep_log = false;
         private static SARC sarc;
         public static Options settings = new Options();
+        public static AesEngine engine = new AesEngine();
 
         static void Main(string[] args)
         {
@@ -40,22 +41,16 @@ namespace BadgeArcadeTool
                 :Util.DeserializeFile<Options>("settings.xml") ?? new Options();
             
             //Validate and Update the settings if necessary.
-            if (!string.IsNullOrEmpty(opts.InputIP))
+            if (!string.IsNullOrEmpty(opts.Boot9))
             {
-                IPAddress ipaddress;
-                if (IPAddress.TryParse(opts.InputIP, out ipaddress))
-                    settings.InputIP = opts.InputIP;
-                else
+                if (!File.Exists(opts.Boot9))
                 {
                     Console.WriteLine(heading);
-                    Console.WriteLine($"Error: Invalid IP Address ({opts.InputIP})");
+                    Console.WriteLine($"Error: Invalid boot rom file path ({opts.Boot9})");
                     return;
                 }
+                settings.Boot9 = opts.Boot9;
             }
-
-            //Set up default Settings if blank.
-            if (string.IsNullOrEmpty(settings.InputIP))
-                settings.InputIP = "192.168.1.137";
 
             //Save the settings.
             Util.Serialize(settings, "settings.xml");
@@ -71,6 +66,15 @@ namespace BadgeArcadeTool
 
             try
             {
+                if (!engine.IsBootRomLoaded)
+                {
+                    if(File.Exists(settings.Boot9))
+                        engine.LoadKeysFromBootromFile(File.ReadAllBytes(opts.Boot9));
+                    else if (File.Exists("boot9.bin"))
+                        engine.LoadKeysFromBootromFile(File.ReadAllBytes("boot9.bin"));
+                    else if (File.Exists("boot9_prot.bin"))
+                        engine.LoadKeysFromBootromFile(File.ReadAllBytes("boot9_prot.bin"));
+                }
                 UpdateArchives();
             }
             catch (Exception ex)
@@ -129,29 +133,12 @@ namespace BadgeArcadeTool
             }
         }
 
-        static bool SelfTest()
-        {
-            var Engine = new AesEngine();
-            var testBoss = ("0000000000000000000000000000000000000000000000000000000000000000" +
-                            "00000000000000004906070A85C541DF89F9A6574163130C6E4B0A341B1D93FE").ToByteArray();
-            var decBoss = Engine.DecryptBOSS(testBoss);
-
-            return decBoss.All(t => t == 0);
-        }
-
 
         static void UpdateArchives()
         {
-            var Engine = new AesEngine();
-            var passedSelftest = SelfTest();
-            if (passedSelftest)
-            {
-                Util.Log("Self test passed.");
-            }
-            else
-            {
-                Util.Log("Self test failed.");
-            }
+            Util.Log(engine.IsBootRomLoaded 
+                ? "boot9 rom loaded - Badge Arcade files will be decrypted" 
+                : "boot9 rom not loaded. Badge Arcade files will not be decrypated");
 
             foreach (var country in country_list.Keys)
             {
@@ -205,11 +192,11 @@ namespace BadgeArcadeTool
                     }
 
                     
-                    if (!File.Exists(sarc_path) && passedSelftest)
+                    if (!File.Exists(sarc_path) && engine.IsBootRomLoaded)
                     {
                         keep_log = true;
                         Util.Log("Decrypting...", false);
-                        var dec_boss = Engine.DecryptBOSS(File.ReadAllBytes(archive_path));
+                        var dec_boss = engine.DecryptBOSS(File.ReadAllBytes(archive_path));
                         if (dec_boss == null)
                             continue;
                         File.WriteAllBytes(sarc_path, dec_boss.Skip(0x296).ToArray());
@@ -217,8 +204,7 @@ namespace BadgeArcadeTool
                         sarc = SARC.Analyze(sarc_path);
                         if (!sarc.valid)
                         {
-                            Util.Log($"Not a valid SARC. Maybe your build of CTRAesEngine is bad.");
-                            passedSelftest = false;
+                            Util.Log($"Not a valid SARC.");
                             File.Delete(sarc_path);
                             continue;
                         }
