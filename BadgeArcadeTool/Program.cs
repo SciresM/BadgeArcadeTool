@@ -69,7 +69,7 @@ namespace BadgeArcadeTool
                 if (!engine.IsBootRomLoaded)
                 {
                     if(File.Exists(settings.Boot9))
-                        engine.LoadKeysFromBootromFile(File.ReadAllBytes(opts.Boot9));
+                        engine.LoadKeysFromBootromFile(File.ReadAllBytes(settings.Boot9));
                     else if (File.Exists("boot9.bin"))
                         engine.LoadKeysFromBootromFile(File.ReadAllBytes("boot9.bin"));
                     else if (File.Exists("boot9_prot.bin"))
