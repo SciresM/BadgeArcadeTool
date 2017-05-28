@@ -1,22 +1,16 @@
 ﻿using System;
-using System.CodeDom;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Net;
-using System.Text;
-using System.Threading.Tasks;
-using System.Xml;
-using System.Xml.Serialization;
 using CommandLine;
+using CTR;
 
 namespace BadgeArcadeTool
 {
     class Program
     {
-        public static DateTime now = DateTime.Now;
         private static string server = "https://npdl.cdn.nintendowifi.net/p01/nsa/{0}/data/{1}?tm=2";
         private const string US_ID = "OvbmGLZ9senvgV3K";
         private const string JP_ID = "j0ITmVqVgfUxe0O9";
@@ -25,18 +19,46 @@ namespace BadgeArcadeTool
         private static readonly Dictionary<string, string> country_list = new Dictionary<string, string>() { {"US", US_ID}, {"JP", JP_ID}, {"EU", EU_ID} }; 
         private static bool keep_log = false;
         private static SARC sarc;
+        public static Options settings = new Options();
+        public static AesEngine engine = new AesEngine();
 
         static void Main(string[] args)
         {
+            var heading = "BadgeArcadeTool v1.0 - SciresM";
             var parser = new Parser();
-            var options = new Options();
-            parser.ParseArguments(args, options);
+            var opts = new Options();
+            
+            if (!parser.ParseArguments(args, opts) || opts.help)
+            {
+                Console.WriteLine(heading);
+                Console.WriteLine(opts.GetUsage());
+                return;
+            }
 
-            Directory.CreateDirectory("logs");
+            //Read settings.xml
+            settings = opts.Reset
+                ? new Options()
+                :Util.DeserializeFile<Options>("settings.xml") ?? new Options();
+            
+            //Validate and Update the settings if necessary.
+            if (!string.IsNullOrEmpty(opts.Boot9))
+            {
+                if (!File.Exists(opts.Boot9))
+                {
+                    Console.WriteLine(heading);
+                    Console.WriteLine($"Error: Invalid boot rom file path ({opts.Boot9})");
+                    return;
+                }
+                settings.Boot9 = opts.Boot9;
+            }
+
+            //Save the settings.
+            Util.Serialize(settings, "settings.xml");
+
             Directory.CreateDirectory("data");
             Directory.CreateDirectory("badges");
 
-            Util.NewLogFile("BadgeArcadeTool v1.0 - SciresM");
+            Util.NewLogFile(heading);
             
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls;
             ServicePointManager.ServerCertificateValidationCallback = delegate { return true; };
@@ -44,7 +66,16 @@ namespace BadgeArcadeTool
 
             try
             {
-                UpdateArchives(options);
+                if (!engine.IsBootRomLoaded)
+                {
+                    if(File.Exists(settings.Boot9))
+                        engine.LoadKeysFromBootromFile(File.ReadAllBytes(settings.Boot9));
+                    else if (File.Exists("boot9.bin"))
+                        engine.LoadKeysFromBootromFile(File.ReadAllBytes("boot9.bin"));
+                    else if (File.Exists("boot9_prot.bin"))
+                        engine.LoadKeysFromBootromFile(File.ReadAllBytes("boot9_prot.bin"));
+                }
+                UpdateArchives();
             }
             catch (Exception ex)
             {
@@ -55,7 +86,7 @@ namespace BadgeArcadeTool
             Util.CloseLogFile(keep_log);
         }
 
-        static void WriteSARCFileData(Options opts, SFATEntry entry, string country, string path, string decompressed_path)
+        static void WriteSARCFileData(SFATEntry entry, string country, string path, string decompressed_path)
         {
 
             File.WriteAllBytes(path, sarc.GetFileData(entry));
@@ -103,10 +134,11 @@ namespace BadgeArcadeTool
         }
 
 
-        static void UpdateArchives(Options opts)
+        static void UpdateArchives()
         {
-            Util.Log("Testing Crypto Server...");
-            var passed_selftest = NetworkUtils.TestCryptoServer(IPAddress.Parse(opts.InputIP));
+            Util.Log(engine.IsBootRomLoaded 
+                ? "3DS Arm 9 boot rom found and loaded - Badge Arcade files will be decrypted" 
+                : "3DS Arm 9 boot rom not found - Badge Arcade files will not be decrypated");
 
             foreach (var country in country_list.Keys)
             {
@@ -159,11 +191,12 @@ namespace BadgeArcadeTool
                         }
                     }
 
-                    if (!File.Exists(sarc_path) && passed_selftest)
+                    
+                    if (!File.Exists(sarc_path) && engine.IsBootRomLoaded)
                     {
                         keep_log = true;
                         Util.Log("Decrypting...", false);
-                        var dec_boss = NetworkUtils.TryDecryptBOSS(File.ReadAllBytes(archive_path), IPAddress.Parse(opts.InputIP));
+                        var dec_boss = engine.DecryptBOSS(File.ReadAllBytes(archive_path));
                         if (dec_boss == null)
                             continue;
                         File.WriteAllBytes(sarc_path, dec_boss.Skip(0x296).ToArray());
@@ -171,8 +204,7 @@ namespace BadgeArcadeTool
                         sarc = SARC.Analyze(sarc_path);
                         if (!sarc.valid)
                         {
-                            Util.Log($"Not a valid SARC. Maybe bad decryption...?");
-                            passed_selftest = false;
+                            Util.Log($"Not a valid SARC.");
                             File.Delete(sarc_path);
                             continue;
                         }
@@ -224,7 +256,7 @@ namespace BadgeArcadeTool
                                 : hashresult == SARCHashResult.Equal
                                     ? $"{country} file: {Path.GetFileName(path)} was deleted"
                                     : $"Updated {country} file: {Path.GetFileName(path)}");
-                            WriteSARCFileData(opts, entry, country, path, decompressed_path);
+                            WriteSARCFileData(entry, country, path, decompressed_path);
                         }
                         else
                         {
@@ -233,9 +265,8 @@ namespace BadgeArcadeTool
 
                             //Can't do nothing for updated files, 
                             //or the file will ALWAYS say its updated every run, not the intended result.
-                            WriteSARCFileData(opts, entry, country, path, decompressed_path);
+                            WriteSARCFileData(entry, country, path, decompressed_path);
                         }
-
                     }
                     Util.Serialize(sarchashes, xml_path);
                     Util.Log($"{country} / {archive}...Extraction Complete");
@@ -243,37 +274,4 @@ namespace BadgeArcadeTool
             }
         }
     }
-
-    [Serializable]
-    [XmlRoot("SARC File Hashes")]
-    public class SARCFileHashes
-    {
-        [XmlElement("Hashes")]
-        public SerializableDictionary<string, string> Hashes =
-            new SerializableDictionary<string, string>();
-
-        public SARCHashResult IsHashEqual(string filename, string hash)
-        {
-            string existinghash;
-            if (Hashes.TryGetValue(filename, out existinghash))
-            {
-                return hash == existinghash ? SARCHashResult.Equal : SARCHashResult.NotEqual;
-            }
-            return SARCHashResult.NotFound;
-        }
-
-        public void SetHash(string filename, string hash)
-        {
-            Hashes[filename] = hash;
-        }
-
-    }
-
-    public enum SARCHashResult
-    {
-        Equal,
-        NotEqual,
-        NotFound
-    }
-
 }

@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Xml.Serialization;
 using static System.String;
 
 namespace BadgeArcadeTool
@@ -190,5 +191,37 @@ namespace BadgeArcadeTool
         public ushort HeaderSize;
         public ushort Unknown;
         public uint StringOffset;
+    }
+
+    [Serializable]
+    [XmlRoot("SARC File Hashes")]
+    public class SARCFileHashes
+    {
+        [XmlElement("Hashes")]
+        public SerializableDictionary<string, string> Hashes =
+            new SerializableDictionary<string, string>();
+
+        public SARCHashResult IsHashEqual(string filename, string hash)
+        {
+            string existinghash;
+            if (Hashes.TryGetValue(filename, out existinghash))
+            {
+                return hash == existinghash ? SARCHashResult.Equal : SARCHashResult.NotEqual;
+            }
+            return SARCHashResult.NotFound;
+        }
+
+        public void SetHash(string filename, string hash)
+        {
+            Hashes[filename] = hash;
+        }
+
+    }
+
+    public enum SARCHashResult
+    {
+        Equal,
+        NotEqual,
+        NotFound
     }
 }
