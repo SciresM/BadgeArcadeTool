@@ -137,8 +137,8 @@ namespace BadgeArcadeTool
         static void UpdateArchives()
         {
             Util.Log(engine.IsBootRomLoaded 
-                ? "boot9 rom loaded - Badge Arcade files will be decrypted" 
-                : "boot9 rom not loaded. Badge Arcade files will not be decrypated");
+                ? "3DS Arm 9 boot rom found and loaded - Badge Arcade files will be decrypted" 
+                : "3DS Arm 9 boot rom not found - Badge Arcade files will not be decrypated");
 
             foreach (var country in country_list.Keys)
             {
